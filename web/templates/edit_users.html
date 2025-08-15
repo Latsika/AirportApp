@@ -1,14 +1,17 @@
 {% extends "layout.html" %}
 {% block content %}
 <h2>Edit User</h2>
-<form method="post">
+<form method="post" action="">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
     <input type="text" name="fullname" value="{{ user[1] }}" required>
     <input type="text" name="nickname" value="{{ user[2] }}" required>
     <select name="role">
-        <option value="user" {% if user[3] == 'user' %}selected{% endif %}>user</option>
-        <option value="admin" {% if user[3] == 'admin' %}selected{% endif %}>admin</option>
+        <option value="User" {% if user[3] == 'User' %}selected{% endif %}>User</option>
+        <option value="Admin" {% if user[3] == 'Admin' %}selected{% endif %}>Admin</option>
     </select>
     <button type="submit">Save</button>
 </form>
-<a href="/users">🔙 Back to Users</a>
+<div style="text-align:center;">
+  <a href="{{ url_for('users') }}">🔙 Back to Users</a>
+</div>
 {% endblock %}
