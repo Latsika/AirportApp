@@ -1,0 +1,14 @@
+{% extends "layout.html" %}
+{% block content %}
+<h2>Edit User</h2>
+<form method="post">
+    <input type="text" name="fullname" value="{{ user[1] }}" required>
+    <input type="text" name="nickname" value="{{ user[2] }}" required>
+    <select name="role">
+        <option value="user" {% if user[3] == 'user' %}selected{% endif %}>user</option>
+        <option value="admin" {% if user[3] == 'admin' %}selected{% endif %}>admin</option>
+    </select>
+    <button type="submit">Save</button>
+</form>
+<a href="/users">🔙 Back to Users</a>
+{% endblock %}
