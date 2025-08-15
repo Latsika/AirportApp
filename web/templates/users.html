@@ -1,31 +1,32 @@
 {% extends "layout.html" %}
 {% block content %}
-<div class="container mt-5">
-    <h2 class="text-center mb-4">User Management</h2>
-    <table class="table table-striped">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Full Name</th>
-                <th>Nickname</th>
-                <th>Role</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for user in users %}
-            <tr>
-                <td>{{ user[0] }}</td>
-                <td>{{ user[1] }}</td>
-                <td>{{ user[2] }}</td>
-                <td>{{ user[3] }}</td>
-                <td>
-                    <a href="{{ url_for('edit_user', user_id=user[0]) }}" class="btn btn-warning btn-sm">Edit</a>
-                    <a href="{{ url_for('delete_user', user_id=user[0]) }}" class="btn btn-danger btn-sm">Delete</a>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<h2>User Management</h2>
+<div style="max-height:50vh; overflow:auto; margin-top:8px;">
+  <table style="width:100%; border-collapse: collapse;">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:8px; border-bottom:1px solid #334155;">ID</th>
+        <th style="text-align:left; padding:8px; border-bottom:1px solid #334155;">Full Name</th>
+        <th style="text-align:left; padding:8px; border-bottom:1px solid #334155;">Nickname</th>
+        <th style="text-align:left; padding:8px; border-bottom:1px solid #334155;">Role</th>
+        <th style="text-align:left; padding:8px; border-bottom:1px solid #334155;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td style="padding:8px; border-bottom:1px solid #1f2937;">{{ u.id }}</td>
+        <td style="padding:8px; border-bottom:1px solid #1f2937;">{{ u.fullname }}</td>
+        <td style="padding:8px; border-bottom:1px solid #1f2937;">{{ u.nickname }}</td>
+        <td style="padding:8px; border-bottom:1px solid #1f2937;">{{ u.role }}</td>
+        <td style="padding:8px; border-bottom:1px solid #1f2937;">
+          <a href="{{ url_for('edit_user', user_id=u.id) }}">Edit</a>
+          &nbsp;|&nbsp;
+          <a href="{{ url_for('delete_user', user_id=u.id) }}">Delete</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 {% endblock %}
