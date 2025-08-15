@@ -1,19 +1,13 @@
 {% extends "layout.html" %}
 {% block content %}
-<div class="container mt-5">
-    <h2 class="text-center mb-4">Reassign Admin Role</h2>
-    <form method="POST">
-        <div class="mb-3">
-            <label for="admin_id" class="form-label">Select new Admin</label>
-            <select name="admin_id" id="admin_id" class="form-select" required>
-                {% for user in users %}
-                    <option value="{{ user[0] }}">{{ user[1] }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="text-center">
-            <button type="submit" class="btn btn-primary">Confirm Reassignment</button>
-        </div>
-    </form>
-</div>
+<h2>Reassign Admin Role</h2>
+<form method="post" action="{{ url_for('reassign_admin') }}">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <select name="admin_id" required>
+        {% for user in users %}
+            <option value="{{ user.id }}">{{ user.fullname }}</option>
+        {% endfor %}
+    </select>
+    <button type="submit">Confirm Reassignment</button>
+</form>
 {% endblock %}
