@@ -1,63 +1,69 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>Airport App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { box-sizing: border-box; }
         html, body {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            width: 100%;
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f4;
+            margin: 0; padding: 0; height: 100%; width: 100%;
+            font-family: Arial, sans-serif; background: #0f172a;
+            color: #e2e8f0;
         }
-        body {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
+        body { display: flex; justify-content: center; align-items: center; }
         .container {
-            background-color: white;
-            padding: 40px;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-            min-width: 300px;
+            width: 100%; max-width: 420px; background: #111827;
+            border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.35);
+            padding: 28px; position: relative;
         }
-        input, button {
-            display: block;
-            width: 100%;
-            margin-top: 10px;
-            padding: 10px;
-            font-size: 16px;
+        h1,h2 { margin: 0 0 18px; letter-spacing: .3px; }
+        input, select, button {
+            width: 100%; padding: 12px 14px; margin-bottom: 12px;
+            border-radius: 12px; border: 1px solid #334155;
+            background: #0b1220; color: #e2e8f0; outline: none;
         }
-        h1, h2 {
-            text-align: center;
+        input:focus, select:focus { border-color: #38bdf8; }
+        button {
+            background: linear-gradient(135deg, #06b6d4, #0ea5e9);
+            cursor: pointer; border: none; font-weight: 600;
         }
-        a {
-            text-align: center;
-            display: block;
-            margin-top: 10px;
-            color: #5c4bc5;
-        }
+        a { color: #7dd3fc; text-decoration: none; }
+        a:hover { text-decoration: underline; }
         .flash {
-            background: #ffdede;
-            color: #b30000;
-            padding: 10px;
-            text-align: center;
-            border-radius: 5px;
-            margin-bottom: 15px;
+            background: #1f2937; border: 1px solid #334155; padding: 10px 12px;
+            border-radius: 12px; margin-bottom: 14px; color: #fef08a;
+        }
+        .logout {
+            position: absolute; top: 10px; right: 14px;
+        }
+        .pill {
+            padding: 6px 10px; border-radius: 999px; background: #0b1220; border: 1px solid #334155;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}
-                <div class="flash">{{ messages[0] }}</div>
-            {% endif %}
-        {% endwith %}
-        {% block content %}{% endblock %}
-    </div>
+<div class="container">
+    {% if session.get('logged_in') %}
+      <div class="logout">
+        <a class="pill" href="{{ url_for('logout') }}">Logout</a>
+      </div>
+    {% endif %}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="flash">{{ messages[0] }}</div>
+        {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+</div>
+
+{% block csrf %}
+<!-- CSRF helper for forms -->
+{% if not session.get('csrf_token') %}
+  {% set _ = session.update({'csrf_token': 'placeholder'}) %}
+{% endif %}
+{% endblock %}
 </body>
 </html>
