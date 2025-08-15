@@ -1,8 +1,10 @@
 {% extends "layout.html" %}
 
 {% block content %}
-<div class="container text-center mt-5">
-    <h1>Admin Page</h1>
-    <p>Welcome, {{ session.nickname }}! You have administrative privileges.</p>
+<h2>Admin</h2>
+<p>Welcome, {{ session.nickname }}.</p>
+<div style="display:flex; flex-direction:column; gap:8px;">
+  <a class="pill" href="{{ url_for('users') }}">Manage Users</a>
+  <a class="pill" href="{{ url_for('reassign_admin') }}">Reassign Admin</a>
 </div>
 {% endblock %}
