@@ -1,0 +1,47 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 900px; }
+  .row { display:grid; gap:10px; }
+  .card { padding:12px 14px; border-radius:14px; background:#0b1220; border:1px solid #334155; }
+  .kv { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .muted { opacity:.85; font-size:12px; }
+  .btn-row { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .btn-small { width:auto; margin:0; padding:10px 14px; border-radius:999px; border:1px solid #334155; background:#111827; color:#e2e8f0; font-weight:900; text-decoration:none; cursor:pointer; }
+  .danger { border-color:#7f1d1d; background:#2a0f12; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Airline detail</h2>
+
+<div class="row">
+  <div class="card">
+    <div class="kv"><strong>Name</strong><span>{{ airline.name }}</span></div>
+  </div>
+  <div class="card">
+    <div class="kv"><strong>Code</strong><span>{{ airline.code or "-" }}</span></div>
+  </div>
+  <div class="card">
+    <div class="kv"><strong>Country</strong><span>{{ airline.country or "-" }}</span></div>
+  </div>
+  <div class="card">
+    <div class="kv"><strong>Active</strong><span>{{ "YES" if airline.active else "NO" }}</span></div>
+  </div>
+  <div class="card">
+    <div class="kv"><strong>Created</strong><span class="muted">{{ airline.created_at_utc }}</span></div>
+    <div class="kv"><strong>Updated</strong><span class="muted">{{ airline.updated_at_utc }}</span></div>
+  </div>
+</div>
+
+<div class="btn-row">
+  <a class="btn-small" href="{{ url_for('airlines_edit', airline_id=airline.id) }}">EDIT</a>
+  <a class="btn-small" href="{{ url_for('airline_fees', airline_id=airline.id) }}">FEES</a>
+
+  <form method="post" action="{{ url_for('airlines_delete', airline_id=airline.id) }}" onsubmit="return confirm('Delete airline {{ airline.name }}?');" style="margin:0;">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <button class="btn-small danger" type="submit">DELETE</button>
+  </form>
+</div>
+{% endblock %}

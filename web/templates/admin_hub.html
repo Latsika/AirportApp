@@ -1,0 +1,83 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 900px; }
+
+  .hub {
+    display: grid;
+    gap: 18px;
+    margin-top: 8px;
+  }
+
+  .hub-title {
+    font-size: 34px;
+    font-weight: 900;
+    margin: 0 0 4px;
+    letter-spacing: .4px;
+  }
+
+  .sub {
+    opacity: .85;
+    margin: 0 0 10px;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+
+  .cardbtn {
+    display: grid;
+    gap: 10px;
+    padding: 18px;
+    border-radius: 18px;
+    background: #0b1220;
+    border: 1px solid #334155;
+    text-decoration: none;
+    color: #e2e8f0;
+  }
+
+  .cardbtn:hover { background: #111827; text-decoration: none; }
+
+  .cardbtn h3 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 900;
+  }
+
+  .cardbtn p {
+    margin: 0;
+    opacity: .85;
+    line-height: 1.35;
+  }
+
+  @media (max-width: 520px) {
+    :root { --container-max: 420px; }
+    .cards { grid-template-columns: 1fr; }
+    .hub-title { font-size: 28px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="hub">
+  <div>
+    <h2 class="hub-title">Admin Hub</h2>
+    <p class="sub">Choose what you want to do.</p>
+  </div>
+
+  <div class="cards">
+    <a class="cardbtn" href="{{ url_for('sales') }}">
+      <h3>Predaj</h3>
+      <p>Zatiaľ placeholder. K tejto stránke sa vrátime neskôr.</p>
+    </a>
+
+    <a class="cardbtn" href="{{ url_for('admin_page') }}">
+      <h3>ADMIN page</h3>
+      <p>Manage users, airlines, reports, notifications and rewards.</p>
+    </a>
+  </div>
+</div>
+{% endblock %}

@@ -1,32 +1,108 @@
 {% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 900px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow: hidden;
+    border-radius: 14px;
+    border: 1px solid #334155;
+    background: #0b1220;
+  }
+
+  th, td {
+    padding: 12px 12px;
+    border-bottom: 1px solid #334155;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  th {
+    font-weight: 900;
+    opacity: 0.95;
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  .actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .btn-small {
+    width: auto;
+    margin: 0;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid #334155;
+    background: #111827;
+    color: #e2e8f0;
+    font-weight: 800;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .btn-small:hover { background: #0f172a; text-decoration: none; }
+
+  .danger {
+    border-color: #7f1d1d;
+    background: #2a0f12;
+  }
+
+  .danger:hover { background: #3a1418; }
+
+  .muted { opacity: .8; font-size: 12px; }
+
+  @media (max-width: 480px) {
+    :root { --container-max: 420px; }
+    th:nth-child(1), td:nth-child(1) { display:none; } /* hide ID on mobile */
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-<h2>User Management</h2>
-<div style="max-height:50vh; overflow:auto; margin-top:8px;">
-  <table style="width:100%; border-collapse: collapse;">
-    <thead>
-      <tr>
-        <th style="text-align:left; padding:8px; border-bottom:1px solid #334155;">ID</th>
-        <th style="text-align:left; padding:8px; border-bottom:1px solid #334155;">Full Name</th>
-        <th style="text-align:left; padding:8px; border-bottom:1px solid #334155;">Nickname</th>
-        <th style="text-align:left; padding:8px; border-bottom:1px solid #334155;">Role</th>
-        <th style="text-align:left; padding:8px; border-bottom:1px solid #334155;">Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for u in users %}
-      <tr>
-        <td style="padding:8px; border-bottom:1px solid #1f2937;">{{ u.id }}</td>
-        <td style="padding:8px; border-bottom:1px solid #1f2937;">{{ u.fullname }}</td>
-        <td style="padding:8px; border-bottom:1px solid #1f2937;">{{ u.nickname }}</td>
-        <td style="padding:8px; border-bottom:1px solid #1f2937;">{{ u.role }}</td>
-        <td style="padding:8px; border-bottom:1px solid #1f2937;">
-          <a href="{{ url_for('edit_user', user_id=u.id) }}">Edit</a>
-          &nbsp;|&nbsp;
-          <a href="{{ url_for('delete_user', user_id=u.id) }}">Delete</a>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+<h2>Users</h2>
+
+<p class="muted">Admin can edit, delete users, or view their login activity.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Full name</th>
+      <th>Nickname</th>
+      <th>Role</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+
+  <tbody>
+  {% for u in users %}
+    <tr>
+      <td>{{ u.id }}</td>
+      <td>{{ u.fullname }}</td>
+      <td>{{ u.nickname }}</td>
+      <td>{{ u.role }}</td>
+      <td>
+        <div class="actions">
+          <a class="btn-small" href="{{ url_for('edit_user', user_id=u.id) }}">EDIT</a>
+          <a class="btn-small danger"
+             href="{{ url_for('delete_user', user_id=u.id) }}"
+             onclick="return confirm('Delete user {{ u.nickname }}?');">
+            DELETE
+          </a>
+          <a class="btn-small" href="{{ url_for('user_logs', user_id=u.id) }}">LOGS</a>
+        </div>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
 {% endblock %}

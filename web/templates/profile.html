@@ -1,0 +1,103 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root {
+    --container-max: 900px; /* ✅ širšie pre My profile */
+  }
+
+  .kv {
+    display: grid;
+    gap: 10px;
+  }
+
+  .kv-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .wrap {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .log-card {
+    display: grid;
+    gap: 6px;
+    width: 100%;
+    border-radius: 14px;
+    padding: 12px 14px;
+    background: #0b1220;
+    border: 1px solid #334155;
+  }
+
+  .log-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-weight: 800;
+  }
+
+  .muted {
+    opacity: .85;
+    font-size: 12px;
+  }
+
+  @media (max-width: 480px) {
+    :root { --container-max: 420px; } /* na mobile nech to zostane compact */
+    .kv-row { flex-direction: column; align-items: flex-start; }
+    .log-head { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>My profile</h2>
+
+<div class="kv">
+    <div class="log-card">
+        <div class="kv-row">
+            <strong>Full name</strong>
+            <span class="wrap">{{ user.fullname }}</span>
+        </div>
+    </div>
+
+    <div class="log-card">
+        <div class="kv-row">
+            <strong>Nickname</strong>
+            <span class="wrap">{{ user.nickname }}</span>
+        </div>
+    </div>
+
+    <div class="log-card">
+        <div class="kv-row">
+            <strong>Role</strong>
+            <span class="wrap">{{ user.role }}</span>
+        </div>
+    </div>
+</div>
+
+<h2 style="margin-top:18px;">Recent login activity</h2>
+
+{% if logs and logs|length > 0 %}
+    <div style="display:grid; gap:10px;">
+        {% for row in logs %}
+            <div class="log-card">
+                <div class="log-head">
+                    <span>{{ row.action }}</span>
+                    <span class="muted wrap">{{ row.created_at_utc }}</span>
+                </div>
+                <div class="muted wrap">
+                    IP: {{ row.ip or "-" }} | UA: {{ row.user_agent or "-" }}
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <p style="opacity:.75;">No activity yet.</p>
+{% endif %}
+{% endblock %}

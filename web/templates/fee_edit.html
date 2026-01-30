@@ -1,0 +1,36 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 700px; }
+  .muted { opacity:.85; font-size:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Edit fee</h2>
+
+<form method="post" action="{{ url_for('airline_fee_edit', airline_id=airline_id, fee_id=fee.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+
+  <label class="muted">Fee key*</label>
+  <input name="fee_key" value="{{ fee.fee_key }}" required>
+
+  <label class="muted">Fee name*</label>
+  <input name="fee_name" value="{{ fee.fee_name }}" required>
+
+  <label class="muted">Amount</label>
+  <input name="amount" value="{{ fee.amount }}">
+
+  <label class="muted">Currency</label>
+  <input name="currency" value="{{ fee.currency }}">
+
+  <label class="muted">Unit</label>
+  <input name="unit" value="{{ fee.unit or '' }}">
+
+  <label class="muted">Notes</label>
+  <input name="notes" value="{{ fee.notes or '' }}">
+
+  <button type="submit">SAVE</button>
+</form>
+{% endblock %}

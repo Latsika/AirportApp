@@ -1,40 +1,79 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import os
 import re
-from datetime import timedelta
+import sys
+import time
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from secrets import token_urlsafe
+from typing import Optional
 
 from flask import (
     Flask,
+    abort,
+    flash,
+    redirect,
     render_template,
     request,
-    redirect,
-    flash,
-    url_for,
     session,
-    abort,
+    url_for,
 )
 
-from database.db import init_db, get_connection, ensure_default_admin
-from utils.security import verify_password, hash_password
+# -----------------------------------------------------------------------------
+# Import path fix (so "python web/app.py" works)
+# -----------------------------------------------------------------------------
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
+from database.db import (  # noqa: E402
+    delete_app_state,
+    ensure_default_admin,
+    get_app_state,
+    get_connection,
+    init_db,
+    log_auth_event,
+    set_app_state,
+)
+from utils.security import hash_password, verify_password_and_upgrade  # noqa: E402
 
 # -----------------------------------------------------------------------------
-# Flask app & security configuration
+# App config
 # -----------------------------------------------------------------------------
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-please-change")  # v prod prostredí určite zmeniť
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-please-change")
 app.config["SESSION_PERMANENT"] = True
-app.permanent_session_lifetime = timedelta(minutes=10)
+app.permanent_session_lifetime = timedelta(minutes=30)
 
-# Init DB & default Admin
 init_db()
 ensure_default_admin(hash_password)
 
+PASSWORD_RE = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$")
+
 
 # -----------------------------------------------------------------------------
-# Helpers: auth guards & CSRF
+# Helpers
 # -----------------------------------------------------------------------------
+def _client_ip() -> Optional[str]:
+    return request.headers.get("X-Forwarded-For", request.remote_addr)
+
+
+def _user_agent() -> Optional[str]:
+    return request.headers.get("User-Agent")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _redirect_after_login(role: str | None):
+    if role == "Admin":
+        return redirect(url_for("admin_hub"))
+    return redirect(url_for("profile"))
+
+
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -56,139 +95,341 @@ def admin_required(f):
     return wrapper
 
 
-def require_csrf():
-    """Minimal CSRF – token do session + do POST formulárov."""
+def require_csrf() -> None:
     token = request.form.get("csrf_token")
     if not token or token != session.get("csrf_token"):
         abort(400)
 
 
+def _sanitize(value: str) -> str:
+    return (value or "").strip()
+
+
+# -----------------------------------------------------------------------------
+# Session enforcement
+# -----------------------------------------------------------------------------
 @app.before_request
-def enforce_session_timeout():
-    # rolling session – každá request obnoví čas
-    if session.get("logged_in"):
-        session.permanent = True
-        # Vytvor CSRF token, ak chýba
-        if not session.get("csrf_token"):
-            session["csrf_token"] = token_urlsafe(32)
+def enforce_session_timeout_and_single_user():
+    session.setdefault("csrf_token", token_urlsafe(32))
+
+    if not session.get("logged_in"):
+        return
+
+    # Single active session enforcement
+    active_sid = get_app_state("active_session_id")
+    current_sid = session.get("sid")
+
+    if active_sid and current_sid and active_sid != current_sid:
+        log_auth_event(
+            user_id=session.get("user_id"),
+            nickname=session.get("nickname"),
+            fullname=session.get("fullname"),
+            role=session.get("role"),
+            action="SESSION_REVOKED",
+            success=True,
+            ip=_client_ip(),
+            user_agent=_user_agent(),
+            details="Another user signed in. You were logged out automatically.",
+        )
+        session.clear()
+        flash("You were logged out because another user signed in.")
+        if request.endpoint not in {"index", "login"}:
+            return redirect(url_for("index"))
+        return
+
+    # Inactivity timeout
+    now_ts = int(time.time())
+    last_ts = session.get("last_activity_ts")
+
+    if last_ts is not None and now_ts - int(last_ts) > 30 * 60:
+        log_auth_event(
+            user_id=session.get("user_id"),
+            nickname=session.get("nickname"),
+            fullname=session.get("fullname"),
+            role=session.get("role"),
+            action="SESSION_EXPIRED",
+            success=True,
+            ip=_client_ip(),
+            user_agent=_user_agent(),
+            details="Auto logout after 30 minutes of inactivity.",
+        )
+
+        if session.get("sid") and session.get("sid") == get_app_state("active_session_id"):
+            delete_app_state("active_session_id")
+
+        session.clear()
+        flash("Session expired. Please login again.")
+        if request.endpoint not in {"index", "login"}:
+            return redirect(url_for("index"))
+        return
+
+    session["last_activity_ts"] = now_ts
 
 
 # -----------------------------------------------------------------------------
-# Password policy
+# Auth routes
 # -----------------------------------------------------------------------------
-PASSWORD_RE = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$")
-
-
-# -----------------------------------------------------------------------------
-# Routes
-# -----------------------------------------------------------------------------
-@app.route("/")
+@app.get("/", endpoint="index")
 def index():
-    # Login page
+    if session.get("logged_in"):
+        return _redirect_after_login(session.get("role"))
     return render_template("index.html")
 
 
-@app.route("/login", methods=["POST"])
+@app.post("/login", endpoint="login")
 def login():
     require_csrf()
-    nickname_or_fullname = request.form.get("nickname", "").strip()
-    password = request.form.get("password", "")
+
+    # Replace existing login in same browser (your requirement)
+    if session.get("logged_in"):
+        log_auth_event(
+            user_id=session.get("user_id"),
+            nickname=session.get("nickname"),
+            fullname=session.get("fullname"),
+            role=session.get("role"),
+            action="LOGOUT",
+            success=True,
+            ip=_client_ip(),
+            user_agent=_user_agent(),
+            details="Replaced by another login in the same browser.",
+        )
+        if session.get("sid") and session.get("sid") == get_app_state("active_session_id"):
+            delete_app_state("active_session_id")
+        session.clear()
+
+    identifier = _sanitize(request.form.get("nickname"))
+    password = request.form.get("password") or ""
+
+    if not identifier or not password:
+        flash("❌ Please enter your name/nickname and password.")
+        log_auth_event(
+            user_id=None,
+            nickname=identifier or None,
+            fullname=None,
+            role=None,
+            action="LOGIN_FAILED",
+            success=False,
+            ip=_client_ip(),
+            user_agent=_user_agent(),
+            details="Missing identifier or password.",
+        )
+        return redirect(url_for("index"))
 
     with get_connection() as conn:
         cur = conn.cursor()
-        # Podľa zadania možno login nick+heslo alebo fullname+heslo
-        cur.execute(
-            "SELECT id, fullname, nickname, password, role, must_change_password FROM users "
-            "WHERE nickname = ? OR fullname = ?",
-            (nickname_or_fullname, nickname_or_fullname),
-        )
-        row = cur.fetchone()
 
-    if not row or not verify_password(password, row["password"]):
+        row = None
+        if " " in identifier:
+            cur.execute(
+                "SELECT id, fullname, nickname, password, role, must_change_password "
+                "FROM users WHERE fullname = ?",
+                (identifier,),
+            )
+            row = cur.fetchone()
+        else:
+            cur.execute(
+                "SELECT id, fullname, nickname, password, role, must_change_password "
+                "FROM users WHERE nickname = ?",
+                (identifier,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                cur.execute(
+                    "SELECT id, fullname, nickname, password, role, must_change_password "
+                    "FROM users WHERE fullname = ?",
+                    (identifier,),
+                )
+                row = cur.fetchone()
+
+    if not row:
         flash("❌ Invalid credentials")
+        log_auth_event(
+            user_id=None,
+            nickname=identifier,
+            fullname=None,
+            role=None,
+            action="LOGIN_FAILED",
+            success=False,
+            ip=_client_ip(),
+            user_agent=_user_agent(),
+            details="User not found by identifier.",
+        )
         return redirect(url_for("index"))
 
-    # Úspešný login
+    ok, upgraded_hash = verify_password_and_upgrade(password, row["password"])
+    if not ok:
+        flash("❌ Invalid credentials")
+        log_auth_event(
+            user_id=row["id"],
+            nickname=row["nickname"],
+            fullname=row["fullname"],
+            role=row["role"],
+            action="LOGIN_FAILED",
+            success=False,
+            ip=_client_ip(),
+            user_agent=_user_agent(),
+            details="Invalid credentials.",
+        )
+        return redirect(url_for("index"))
+
+    # upgrade legacy password hash
+    if upgraded_hash:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("UPDATE users SET password = ? WHERE id = ?", (upgraded_hash, row["id"]))
+            conn.commit()
+
+    # create new session id and mark globally active
+    sid = token_urlsafe(16)
+
     session["logged_in"] = True
     session["user_id"] = row["id"]
     session["nickname"] = row["nickname"]
     session["fullname"] = row["fullname"]
     session["role"] = row["role"]
-    session.setdefault("csrf_token", token_urlsafe(32))
+    session["last_activity_ts"] = int(time.time())
+    session["sid"] = sid
 
-    # Vynútenie zmeny hesla
+    set_app_state("active_session_id", sid)
+
+    log_auth_event(
+        user_id=row["id"],
+        nickname=row["nickname"],
+        fullname=row["fullname"],
+        role=row["role"],
+        action="LOGIN_SUCCESS",
+        success=True,
+        ip=_client_ip(),
+        user_agent=_user_agent(),
+        details="User signed in.",
+    )
+
     if row["must_change_password"]:
         return redirect(url_for("change_password"))
 
-    # Admin dostane admin stránku, user budúci Main Page (zatiaľ admin stránka ako placeholder)
-    if row["role"] == "Admin":
-        return redirect(url_for("admin"))
-    return redirect(url_for("admin"))  # dočasne – kým nepridáme hlavnú stránku
+    return _redirect_after_login(row["role"])
 
 
-@app.route("/logout")
+@app.get("/logout", endpoint="logout")
 def logout():
+    if session.get("logged_in"):
+        log_auth_event(
+            user_id=session.get("user_id"),
+            nickname=session.get("nickname"),
+            fullname=session.get("fullname"),
+            role=session.get("role"),
+            action="LOGOUT",
+            success=True,
+            ip=_client_ip(),
+            user_agent=_user_agent(),
+            details="User clicked logout.",
+        )
+        if session.get("sid") and session.get("sid") == get_app_state("active_session_id"):
+            delete_app_state("active_session_id")
+
     session.clear()
     flash("You have been logged out.")
     return redirect(url_for("index"))
 
 
-@app.route("/register", methods=["GET", "POST"])
+# ✅ FIX: Register endpoint exists (so url_for('register') works)
+@app.route("/register", methods=["GET", "POST"], endpoint="register")
 def register():
     if request.method == "GET":
         return render_template("register.html")
 
-    # POST
     require_csrf()
-    fullname = (request.form.get("fullname") or "").strip()
-    nickname = (request.form.get("nickname") or "").strip()
+    fullname = _sanitize(request.form.get("fullname"))
+    nickname = _sanitize(request.form.get("nickname"))
     password = request.form.get("password") or ""
-    q1 = (request.form.get("q1") or "").strip()
-    a1 = (request.form.get("a1") or "").strip()
-    q2 = (request.form.get("q2") or "").strip()
-    a2 = (request.form.get("a2") or "").strip()
-    q3 = (request.form.get("q3") or "").strip()
-    a3 = (request.form.get("a3") or "").strip()
+
+    q1 = _sanitize(request.form.get("q1"))
+    a1 = _sanitize(request.form.get("a1"))
+    q2 = _sanitize(request.form.get("q2"))
+    a2 = _sanitize(request.form.get("a2"))
+    q3 = _sanitize(request.form.get("q3"))
+    a3 = _sanitize(request.form.get("a3"))
 
     if not PASSWORD_RE.match(password):
-        flash("Password must be 8+ chars incl. letters, digits and special char.")
+        flash("❌ Password must have min 8 chars and include letters, numbers and symbols.")
         return redirect(url_for("register"))
 
     if not (fullname and nickname and q1 and a1 and q2 and a2 and q3 and a3):
-        flash("Please fill all fields including 3 security questions.")
+        flash("❌ Please fill all fields including 3 security questions.")
         return redirect(url_for("register"))
 
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT 1 FROM users WHERE nickname = ?", (nickname,))
-        if cur.fetchone():
-            flash("❌ Nickname already exists")
-            return redirect(url_for("register"))
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO users (fullname, nickname, password, role, q1, a1, q2, a2, q3, a3)
+                VALUES (?, ?, ?, 'User', ?, ?, ?, ?, ?, ?)
+                """,
+                (fullname, nickname, hash_password(password), q1, a1, q2, a2, q3, a3),
+            )
+            conn.commit()
+    except Exception:
+        flash("❌ Nickname already exists.")
+        return redirect(url_for("register"))
 
-        cur.execute(
-            """
-            INSERT INTO users (fullname, nickname, password, role, q1, a1, q2, a2, q3, a3)
-            VALUES (?, ?, ?, 'User', ?, ?, ?, ?, ?, ?)
-            """,
-            (fullname, nickname, hash_password(password), q1, a1, q2, a2, q3, a3),
-        )
-        conn.commit()
-
-    flash("✅ Registration successful. You can log in now.")
+    flash("✅ User created. You can login now.")
     return redirect(url_for("index"))
 
 
-@app.route("/change_password", methods=["GET", "POST"])
+# ✅ FIX: Forgot endpoint exists (so url_for('forgot') works)
+@app.route("/forgot", methods=["GET", "POST"], endpoint="forgot")
+def forgot():
+    if request.method == "GET":
+        return render_template("forgot.html")
+
+    require_csrf()
+    nickname = _sanitize(request.form.get("nickname"))
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE nickname = ?", (nickname,))
+        user = cur.fetchone()
+
+    if not user:
+        flash("❌ User not found.")
+        return redirect(url_for("forgot"))
+
+    a1 = request.form.get("a1") or ""
+    a2 = request.form.get("a2") or ""
+    a3 = request.form.get("a3") or ""
+
+    if a1 != (user["a1"] or "") or a2 != (user["a2"] or "") or a3 != (user["a3"] or ""):
+        flash("❌ Answers do not match.")
+        return redirect(url_for("forgot"))
+
+    new_password = request.form.get("new_password") or ""
+    if not PASSWORD_RE.match(new_password):
+        flash("❌ Password must have min 8 chars and include letters, numbers and symbols.")
+        return redirect(url_for("forgot"))
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE users SET password = ?, must_change_password = 0 WHERE id = ?",
+            (hash_password(new_password), user["id"]),
+        )
+        conn.commit()
+
+    flash("✅ Password reset. You can login.")
+    return redirect(url_for("index"))
+
+
+@app.route("/change_password", methods=["GET", "POST"], endpoint="change_password")
 @login_required
 def change_password():
-    # stránka na vynútenú zmenu hesla pre usera s must_change_password=1
     if request.method == "GET":
         return render_template("change_password.html")
 
     require_csrf()
     new_password = request.form.get("new_password") or ""
     if not PASSWORD_RE.match(new_password):
-        flash("Password must be 8+ chars incl. letters, digits and special char.")
+        flash("❌ Password must have min 8 chars and include letters, numbers and symbols.")
         return redirect(url_for("change_password"))
 
     with get_connection() as conn:
@@ -199,151 +440,437 @@ def change_password():
         )
         conn.commit()
 
-    flash("✅ Password updated.")
-    return redirect(url_for("admin" if session.get("role") == "Admin" else "index"))
+    flash("✅ Password changed.")
+    return _redirect_after_login(session.get("role"))
 
 
-@app.route("/forgot", methods=["GET", "POST"])
-def forgot():
-    # Overenie 3 odpovedí + reset hesla
-    if request.method == "GET":
-        return render_template("forgot.html")
-
-    require_csrf()
-    nickname = (request.form.get("nickname") or "").strip()
-    a1 = (request.form.get("a1") or "").strip()
-    a2 = (request.form.get("a2") or "").strip()
-    a3 = (request.form.get("a3") or "").strip()
-    new_password = request.form.get("new_password") or ""
-
-    if not PASSWORD_RE.match(new_password):
-        flash("Password must be 8+ chars incl. letters, digits and special char.")
-        return redirect(url_for("forgot"))
+# -----------------------------------------------------------------------------
+# Profile
+# -----------------------------------------------------------------------------
+@app.get("/profile", endpoint="profile")
+@login_required
+def profile():
+    user_id = session.get("user_id")
 
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT id, a1, a2, a3 FROM users WHERE nickname = ?",
-            (nickname,),
-        )
-        row = cur.fetchone()
-        if not row:
-            flash("❌ Unknown user.")
-            return redirect(url_for("forgot"))
-
-        if (a1 != (row["a1"] or "")) or (a2 != (row["a2"] or "")) or (a3 != (row["a3"] or "")):
-            flash("❌ Answers do not match.")
-            return redirect(url_for("forgot"))
+        cur.execute("SELECT id, fullname, nickname, role FROM users WHERE id = ?", (user_id,))
+        user = cur.fetchone()
 
         cur.execute(
-            "UPDATE users SET password = ?, must_change_password = 0 WHERE id = ?",
-            (hash_password(new_password), row["id"]),
+            """
+            SELECT action, ip, user_agent, created_at_utc
+            FROM auth_logs
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT 10
+            """,
+            (user_id,),
         )
-        conn.commit()
+        logs = cur.fetchall()
 
-    flash("✅ Password reset. You can log in.")
-    return redirect(url_for("index"))
+    if not user:
+        flash("User not found.")
+        return redirect(url_for("index"))
+
+    return render_template("profile.html", user=user, logs=logs)
 
 
-# ----------------------- Admin & User management ------------------------------
-@app.route("/admin")
+# -----------------------------------------------------------------------------
+# Admin HUB / pages
+# -----------------------------------------------------------------------------
+@app.get("/admin_hub", endpoint="admin_hub")
+@admin_required
+def admin_hub():
+    return render_template("admin_hub.html")
+
+
+@app.get("/sales", endpoint="sales")
+@admin_required
+def sales():
+    return render_template("sales.html")
+
+
+@app.get("/admin_page", endpoint="admin_page")
+@admin_required
+def admin_page():
+    return render_template("admin_page.html")
+
+
+@app.get("/admin", endpoint="admin")
 @admin_required
 def admin():
-    return render_template("admin.html")
+    return redirect(url_for("admin_page"))
 
 
-@app.route("/users")
+# -----------------------------------------------------------------------------
+# Admin: Users
+# -----------------------------------------------------------------------------
+@app.get("/users", endpoint="users")
 @admin_required
 def users():
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id, fullname, nickname, role FROM users ORDER BY id ASC")
-        rows = cur.fetchall()
-    return render_template("users.html", users=rows)
+        all_users = cur.fetchall()
+    return render_template("users.html", users=all_users)
 
 
-@app.route("/edit_user/<int:user_id>", methods=["GET", "POST"])
+@app.get("/user_logs/<int:user_id>", endpoint="user_logs")
+@admin_required
+def user_logs(user_id: int):
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        cur.execute("SELECT id, fullname, nickname, role FROM users WHERE id = ?", (user_id,))
+        user = cur.fetchone()
+        if not user:
+            flash("❌ User not found.")
+            return redirect(url_for("users"))
+
+        cur.execute(
+            """
+            SELECT action, success, ip, user_agent, details, created_at_utc
+            FROM auth_logs
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT 200
+            """,
+            (user_id,),
+        )
+        logs = cur.fetchall()
+
+    return render_template("user_logs.html", user=user, logs=logs)
+
+
+@app.route("/edit_user/<int:user_id>", methods=["GET", "POST"], endpoint="edit_user")
 @admin_required
 def edit_user(user_id: int):
     with get_connection() as conn:
         cur = conn.cursor()
-        if request.method == "GET":
-            cur.execute("SELECT id, fullname, nickname, role FROM users WHERE id = ?", (user_id,))
-            row = cur.fetchone()
-            if not row:
-                flash("User not found.")
-                return redirect(url_for("users"))
-            return render_template("edit_users.html", user=row)
+        cur.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        user = cur.fetchone()
 
-        # POST
-        require_csrf()
-        fullname = (request.form.get("fullname") or "").strip()
-        nickname = (request.form.get("nickname") or "").strip()
-        role = request.form.get("role") or "User"
-        if role not in ("User", "Admin"):
-            flash("Invalid role.")
-            return redirect(url_for("edit_user", user_id=user_id))
+    if not user:
+        flash("❌ User not found.")
+        return redirect(url_for("users"))
 
+    if request.method == "GET":
+        return render_template("edit_users.html", user=user)
+
+    require_csrf()
+    fullname = _sanitize(request.form.get("fullname"))
+    nickname = _sanitize(request.form.get("nickname"))
+    role = request.form.get("role", "User")
+
+    with get_connection() as conn:
+        cur = conn.cursor()
         cur.execute(
             "UPDATE users SET fullname = ?, nickname = ?, role = ? WHERE id = ?",
             (fullname, nickname, role, user_id),
         )
         conn.commit()
-        flash("✅ User updated")
-        return redirect(url_for("users"))
+
+    flash("✅ User updated.")
+    return redirect(url_for("users"))
 
 
-@app.route("/delete_user/<int:user_id>")
+@app.get("/delete_user/<int:user_id>", endpoint="delete_user")
 @admin_required
 def delete_user(user_id: int):
     with get_connection() as conn:
         cur = conn.cursor()
-
-        # zakáž zmazanie posledného Admina
-        cur.execute("SELECT role, nickname FROM users WHERE id = ?", (user_id,))
-        row = cur.fetchone()
-        if not row:
-            flash("User not found.")
-            return redirect(url_for("users"))
-
-        if row["role"] == "Admin":
-            cur.execute("SELECT COUNT(*) FROM users WHERE role = 'Admin'")
-            admin_count = cur.fetchone()[0]
-            if admin_count <= 1:
-                flash("Cannot delete the last Admin. Reassign first.")
-                return redirect(url_for("users"))
-
         cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
-
-    flash("✅ User deleted")
+    flash("✅ User deleted.")
     return redirect(url_for("users"))
 
 
-@app.route("/reassign_admin", methods=["GET", "POST"])
+# -----------------------------------------------------------------------------
+# Admin: Airlines CRUD
+# -----------------------------------------------------------------------------
+@app.get("/airlines", endpoint="airlines")
 @admin_required
-def reassign_admin():
+def airlines():
     with get_connection() as conn:
         cur = conn.cursor()
-        if request.method == "GET":
-            cur.execute("SELECT id, fullname FROM users WHERE role = 'User' ORDER BY fullname")
-            rows = cur.fetchall()
-            return render_template("reassign_admin.html", users=rows)
+        cur.execute(
+            "SELECT id, name, code, country, active, updated_at_utc "
+            "FROM airlines ORDER BY name COLLATE NOCASE ASC"
+        )
+        rows = cur.fetchall()
+    return render_template("airlines.html", airlines=rows)
 
-        require_csrf()
-        new_admin_id = int(request.form.get("admin_id"))
 
-        # aktuálneho admina znížime na User, vybraného povýšime
-        cur.execute("UPDATE users SET role = 'User' WHERE role = 'Admin'")
-        cur.execute("UPDATE users SET role = 'Admin' WHERE id = ?", (new_admin_id,))
+@app.route("/airlines/add", methods=["GET", "POST"], endpoint="airlines_add")
+@admin_required
+def airlines_add():
+    if request.method == "GET":
+        return render_template("airline_add.html")
+
+    require_csrf()
+    name = _sanitize(request.form.get("name"))
+    code = _sanitize(request.form.get("code")) or None
+    country = _sanitize(request.form.get("country")) or None
+    active = 1 if (request.form.get("active") == "on") else 0
+
+    if not name:
+        flash("❌ Name is required.")
+        return redirect(url_for("airlines_add"))
+
+    now = _utc_now_iso()
+
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO airlines (name, code, country, active, created_at_utc, updated_at_utc)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (name, code, country, active, now, now),
+            )
+            conn.commit()
+    except Exception:
+        flash("❌ Airline code already exists (or invalid data).")
+        return redirect(url_for("airlines_add"))
+
+    flash("✅ Airline added.")
+    return redirect(url_for("airlines"))
+
+
+@app.get("/airlines/<int:airline_id>", endpoint="airline_detail")
+@admin_required
+def airline_detail(airline_id: int):
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, name, code, country, active, created_at_utc, updated_at_utc "
+            "FROM airlines WHERE id = ?",
+            (airline_id,),
+        )
+        airline = cur.fetchone()
+
+    if not airline:
+        flash("❌ Airline not found.")
+        return redirect(url_for("airlines"))
+
+    return render_template("airline_detail.html", airline=airline)
+
+
+@app.route("/airlines/<int:airline_id>/edit", methods=["GET", "POST"], endpoint="airlines_edit")
+@admin_required
+def airlines_edit(airline_id: int):
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, name, code, country, active FROM airlines WHERE id = ?",
+            (airline_id,),
+        )
+        airline = cur.fetchone()
+
+    if not airline:
+        flash("❌ Airline not found.")
+        return redirect(url_for("airlines"))
+
+    if request.method == "GET":
+        return render_template("airline_edit.html", airline=airline)
+
+    require_csrf()
+    name = _sanitize(request.form.get("name"))
+    code = _sanitize(request.form.get("code")) or None
+    country = _sanitize(request.form.get("country")) or None
+    active = 1 if (request.form.get("active") == "on") else 0
+
+    if not name:
+        flash("❌ Name is required.")
+        return redirect(url_for("airlines_edit", airline_id=airline_id))
+
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE airlines
+                SET name = ?, code = ?, country = ?, active = ?, updated_at_utc = ?
+                WHERE id = ?
+                """,
+                (name, code, country, active, _utc_now_iso(), airline_id),
+            )
+            conn.commit()
+    except Exception:
+        flash("❌ Airline code already exists (or invalid data).")
+        return redirect(url_for("airlines_edit", airline_id=airline_id))
+
+    flash("✅ Airline updated.")
+    return redirect(url_for("airline_detail", airline_id=airline_id))
+
+
+@app.post("/airlines/<int:airline_id>/delete", endpoint="airlines_delete")
+@admin_required
+def airlines_delete(airline_id: int):
+    require_csrf()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM airlines WHERE id = ?", (airline_id,))
         conn.commit()
-
-    flash("✅ Admin role reassigned.")
-    return redirect(url_for("users"))
+    flash("✅ Airline deleted.")
+    return redirect(url_for("airlines"))
 
 
 # -----------------------------------------------------------------------------
-# Main
+# Admin: Change fees flow
 # -----------------------------------------------------------------------------
+@app.get("/fees", endpoint="fees_select")
+@admin_required
+def fees_select():
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, code FROM airlines WHERE active = 1 ORDER BY name COLLATE NOCASE ASC")
+        airlines_list = cur.fetchall()
+    return render_template("fees_select.html", airlines=airlines_list)
+
+
+@app.get("/airlines/<int:airline_id>/fees", endpoint="airline_fees")
+@admin_required
+def airline_fees(airline_id: int):
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, code FROM airlines WHERE id = ?", (airline_id,))
+        airline = cur.fetchone()
+        if not airline:
+            flash("❌ Airline not found.")
+            return redirect(url_for("fees_select"))
+
+        cur.execute(
+            """
+            SELECT id, fee_key, fee_name, amount, currency, unit, notes, updated_at_utc
+            FROM airline_fees
+            WHERE airline_id = ?
+            ORDER BY fee_name COLLATE NOCASE ASC
+            """,
+            (airline_id,),
+        )
+        fees = cur.fetchall()
+
+    return render_template("airline_fees.html", airline=airline, fees=fees)
+
+
+@app.post("/airlines/<int:airline_id>/fees/add", endpoint="airline_fees_add")
+@admin_required
+def airline_fees_add(airline_id: int):
+    require_csrf()
+    fee_key = _sanitize(request.form.get("fee_key"))
+    fee_name = _sanitize(request.form.get("fee_name"))
+    amount_raw = _sanitize(request.form.get("amount") or "0")
+    currency = _sanitize(request.form.get("currency") or "EUR") or "EUR"
+    unit = _sanitize(request.form.get("unit")) or None
+    notes = _sanitize(request.form.get("notes")) or None
+
+    if not fee_key or not fee_name:
+        flash("❌ Fee key and fee name are required.")
+        return redirect(url_for("airline_fees", airline_id=airline_id))
+
+    try:
+        amount = float(amount_raw) if amount_raw else 0.0
+    except ValueError:
+        flash("❌ Amount must be a number.")
+        return redirect(url_for("airline_fees", airline_id=airline_id))
+
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO airline_fees (airline_id, fee_key, fee_name, amount, currency, unit, notes, updated_at_utc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (airline_id, fee_key, fee_name, amount, currency, unit, notes, _utc_now_iso()),
+            )
+            conn.commit()
+    except Exception:
+        flash("❌ Fee key must be unique per airline (or invalid data).")
+        return redirect(url_for("airline_fees", airline_id=airline_id))
+
+    flash("✅ Fee added.")
+    return redirect(url_for("airline_fees", airline_id=airline_id))
+
+
+@app.route(
+    "/airlines/<int:airline_id>/fees/<int:fee_id>/edit",
+    methods=["GET", "POST"],
+    endpoint="airline_fee_edit",
+)
+@admin_required
+def airline_fee_edit(airline_id: int, fee_id: int):
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, fee_key, fee_name, amount, currency, unit, notes
+            FROM airline_fees
+            WHERE id = ? AND airline_id = ?
+            """,
+            (fee_id, airline_id),
+        )
+        fee = cur.fetchone()
+
+    if not fee:
+        flash("❌ Fee not found.")
+        return redirect(url_for("airline_fees", airline_id=airline_id))
+
+    if request.method == "GET":
+        return render_template("fee_edit.html", airline_id=airline_id, fee=fee)
+
+    require_csrf()
+    fee_key = _sanitize(request.form.get("fee_key"))
+    fee_name = _sanitize(request.form.get("fee_name"))
+    amount_raw = _sanitize(request.form.get("amount") or "0")
+    currency = _sanitize(request.form.get("currency") or "EUR") or "EUR"
+    unit = _sanitize(request.form.get("unit")) or None
+    notes = _sanitize(request.form.get("notes")) or None
+
+    if not fee_key or not fee_name:
+        flash("❌ Fee key and fee name are required.")
+        return redirect(url_for("airline_fee_edit", airline_id=airline_id, fee_id=fee_id))
+
+    try:
+        amount = float(amount_raw) if amount_raw else 0.0
+    except ValueError:
+        flash("❌ Amount must be a number.")
+        return redirect(url_for("airline_fee_edit", airline_id=airline_id, fee_id=fee_id))
+
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE airline_fees
+                SET fee_key = ?, fee_name = ?, amount = ?, currency = ?, unit = ?, notes = ?, updated_at_utc = ?
+                WHERE id = ? AND airline_id = ?
+                """,
+                (fee_key, fee_name, amount, currency, unit, notes, _utc_now_iso(), fee_id, airline_id),
+            )
+            conn.commit()
+    except Exception:
+        flash("❌ Fee key must be unique per airline (or invalid data).")
+        return redirect(url_for("airline_fee_edit", airline_id=airline_id, fee_id=fee_id))
+
+    flash("✅ Fee updated.")
+    return redirect(url_for("airline_fees", airline_id=airline_id))
+
+
+@app.post("/airlines/<int:airline_id>/fees/<int:fee_id>/delete", endpoint="airline_fee_delete")
+@admin_required
+def airline_fee_delete(airline_id: int, fee_id: int):
+    require_csrf()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM airline_fees WHERE id = ? AND airline_id = ?", (fee_id, airline_id))
+        conn.commit()
+    flash("✅ Fee deleted.")
+    return redirect(url_for("airline_fees", airline_id=airline_id))
+
+
 if __name__ == "__main__":
     app.run(debug=True)

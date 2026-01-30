@@ -1,0 +1,46 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 700px; }
+  .muted { opacity:.85; font-size:13px; }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .btn-row { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
+  .btn-small {
+    width:auto; margin:0; padding:10px 14px; border-radius:999px;
+    border:1px solid #334155; background:#111827; color:#e2e8f0;
+    font-weight:1000; text-decoration:none; cursor:pointer;
+  }
+  .btn-small.primary { background: linear-gradient(135deg, #06b6d4, #0ea5e9); border:none; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% if mode == 'add' %}
+  <h2>Add Airline</h2>
+  <p class="muted">Create a new airline (Name + unique Code).</p>
+{% else %}
+  <h2>Edit Airline</h2>
+  <p class="muted">Update airline data.</p>
+{% endif %}
+
+<form method="post">
+  <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+
+  <label class="muted">Name</label>
+  <input name="name" value="{{ airline.name if airline else '' }}" placeholder="e.g. Lufthansa" required>
+
+  <label class="muted">Code (unique)</label>
+  <input name="code" value="{{ airline.code if airline else '' }}" placeholder="e.g. LH" required>
+
+  <label class="muted">
+    <input type="checkbox" name="active" {% if airline and airline.active %}checked{% elif mode=='add' %}checked{% endif %}>
+    Active
+  </label>
+
+  <div class="btn-row">
+    <button class="btn-small primary" type="submit">SAVE</button>
+    <a class="btn-small" href="{{ url_for('airlines') }}">CANCEL</a>
+  </div>
+</form>
+{% endblock %}

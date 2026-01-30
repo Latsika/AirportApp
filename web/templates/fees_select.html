@@ -1,0 +1,35 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 700px; }
+  .muted { opacity:.85; font-size:12px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  select { margin-bottom: 0; }
+  .go { width:auto; padding:12px 18px; border-radius:999px; font-weight:900; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Change fees</h2>
+<p class="muted">Select airline and click GO to manage its fees.</p>
+
+<form class="row" method="get" onsubmit="return true;">
+  <select id="airlineSelect" required>
+    <option value="" selected disabled>Select airline...</option>
+    {% for a in airlines %}
+      <option value="{{ a.id }}">{{ a.name }}{% if a.code %} ({{ a.code }}){% endif %}</option>
+    {% endfor %}
+  </select>
+
+  <button class="go" type="button" onclick="goToFees()">GO</button>
+</form>
+
+<script>
+  function goToFees() {
+    const sel = document.getElementById("airlineSelect");
+    if (!sel.value) return;
+    window.location.href = "/airlines/" + sel.value + "/fees";
+  }
+</script>
+{% endblock %}

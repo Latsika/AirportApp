@@ -6,13 +6,13 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from database.db import init_db, get_connection, DB_NAME
+from database.db import init_db, get_connection, get_db_path
 
 class TestDatabaseInitialization(unittest.TestCase):
 
     def setUp(self):
-        if os.path.exists(DB_NAME):
-            os.remove(DB_NAME)
+        if os.path.exists(get_db_path()):
+            os.remove(get_db_path())
 
     def test_users_table_created(self):
         init_db()
@@ -24,8 +24,8 @@ class TestDatabaseInitialization(unittest.TestCase):
             self.assertEqual(result[0], 'users')
 
     def tearDown(self):
-        if os.path.exists(DB_NAME):
-            os.remove(DB_NAME)
+        if os.path.exists(get_db_path()):
+            os.remove(get_db_path())
 
 if __name__ == '__main__':
     unittest.main()

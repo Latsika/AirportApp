@@ -1,0 +1,112 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 1100px; }
+
+  .topline { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
+  .muted { opacity:.85; font-size:12px; }
+  .card { padding:12px 14px; border-radius:14px; background:#0b1220; border:1px solid #334155; margin-top:12px; }
+
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns:1fr; } }
+
+  table { width:100%; border-collapse:collapse; border-radius:14px; overflow:hidden; border:1px solid #334155; background:#0b1220; margin-top:12px; }
+  th, td { padding:12px; border-bottom:1px solid #334155; text-align:left; vertical-align:top; }
+  th { font-weight:900; opacity:.95; }
+  tr:last-child td { border-bottom:none; }
+
+  .btn-small { width:auto; margin:0; padding:8px 12px; border-radius:999px; border:1px solid #334155; background:#111827; color:#e2e8f0; font-weight:900; text-decoration:none; cursor:pointer; }
+  .danger { border-color:#7f1d1d; background:#2a0f12; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topline">
+  <div>
+    <h2>Fees – {{ airline.name }}{% if airline.code %} ({{ airline.code }}){% endif %}</h2>
+    <div class="muted">Each airline has its own fee set (admin managed).</div>
+  </div>
+  <a class="btn-small" href="{{ url_for('fees_select') }}">Change airline</a>
+</div>
+
+<div class="card">
+  <h3 style="margin:0 0 10px;">Add new fee</h3>
+  <form method="post" action="{{ url_for('airline_fees_add', airline_id=airline.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+
+    <div class="grid2">
+      <div>
+        <div class="muted">Fee key* (unique per airline)</div>
+        <input name="fee_key" placeholder="SECURITY_FEE" required>
+      </div>
+      <div>
+        <div class="muted">Fee name*</div>
+        <input name="fee_name" placeholder="Security fee" required>
+      </div>
+
+      <div>
+        <div class="muted">Amount</div>
+        <input name="amount" placeholder="0.00">
+      </div>
+      <div>
+        <div class="muted">Currency</div>
+        <input name="currency" value="EUR">
+      </div>
+
+      <div>
+        <div class="muted">Unit</div>
+        <input name="unit" placeholder="per pax / per segment ...">
+      </div>
+      <div>
+        <div class="muted">Notes</div>
+        <input name="notes" placeholder="optional">
+      </div>
+    </div>
+
+    <button type="submit" style="margin-top:10px;">SAVE</button>
+  </form>
+</div>
+
+{% if fees and fees|length > 0 %}
+<table>
+  <thead>
+    <tr>
+      <th>Key</th>
+      <th>Name</th>
+      <th>Amount</th>
+      <th>Currency</th>
+      <th>Unit</th>
+      <th>Notes</th>
+      <th>Updated</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for f in fees %}
+    <tr>
+      <td>{{ f.fee_key }}</td>
+      <td>{{ f.fee_name }}</td>
+      <td>{{ f.amount }}</td>
+      <td>{{ f.currency }}</td>
+      <td>{{ f.unit or "-" }}</td>
+      <td>{{ f.notes or "-" }}</td>
+      <td class="muted">{{ f.updated_at_utc }}</td>
+      <td>
+        <a class="btn-small" href="{{ url_for('airline_fee_edit', airline_id=airline.id, fee_id=f.id) }}">EDIT</a>
+
+        <form method="post" action="{{ url_for('airline_fee_delete', airline_id=airline.id, fee_id=f.id) }}"
+              onsubmit="return confirm('Delete fee {{ f.fee_name }}?');"
+              style="display:inline; margin:0;">
+          <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+          <button class="btn-small danger" type="submit">DELETE</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted" style="margin-top:12px;">No fees yet. Add the first fee above.</p>
+{% endif %}
+{% endblock %}

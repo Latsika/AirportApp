@@ -1,0 +1,266 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 1100px; }
+
+  .title {
+    text-align: center;
+    font-size: 36px;
+    font-weight: 1000;
+    margin: 0 0 14px;
+    letter-spacing: .6px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+
+  .menu {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 16px;
+    background: #0b1220;
+    border: 1px solid #334155;
+  }
+
+  .menu a, .menu button, .menu summary {
+    width: 100%;
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid #334155;
+    background: #111827;
+    color: #e2e8f0;
+    font-weight: 900;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: left;
+    display: block;
+  }
+
+  .menu a:hover, .menu button:hover, .menu summary:hover {
+    background: #0f172a;
+    text-decoration: none;
+  }
+
+  .menu button.active {
+    border-color: #38bdf8;
+  }
+
+  /* details/summary reset */
+  details { margin: 0; }
+  summary { list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+
+  .submenu {
+    display: grid;
+    gap: 8px;
+    padding-left: 10px;
+    margin-top: 8px;
+  }
+
+  .submenu a {
+    font-weight: 800;
+    opacity: .95;
+    padding: 9px 12px;
+  }
+
+  .content {
+    display: grid;
+    gap: 14px;
+  }
+
+  .card {
+    padding: 16px;
+    border-radius: 18px;
+    background: #0b1220;
+    border: 1px solid #334155;
+  }
+
+  .card h3 {
+    margin: 0 0 10px;
+    font-size: 18px;
+    font-weight: 1000;
+  }
+
+  .muted { opacity: .85; font-size: 13px; line-height: 1.4; }
+
+  /* ✅ nič sa nezobrazí, kým si neklikneš */
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .pillx {
+    padding: 10px 12px;
+    border-radius: 999px;
+    border: 1px solid #334155;
+    background: #111827;
+    font-weight: 900;
+  }
+
+  .emails {
+    width: 100%;
+    min-height: 90px;
+    resize: vertical;
+  }
+
+  .btn-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+
+  .btn {
+    width: auto;
+    margin: 0;
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1px solid #334155;
+    background: linear-gradient(135deg, #06b6d4, #0ea5e9);
+    font-weight: 1000;
+    cursor: pointer;
+  }
+
+  .btn.secondary {
+    background: #111827;
+  }
+
+  @media (max-width: 720px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 520px) {
+    :root { --container-max: 420px; }
+    .title { font-size: 28px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2 class="title">ADMIN page</h2>
+
+<div class="grid">
+  <!-- LEFT MENU -->
+  <div class="menu">
+    <!-- Samostatná stránka -->
+    <a href="{{ url_for('users') }}">Manage users</a>
+
+    {# ✅ Manage Airline: iba dropdown, nič vpravo nemení #}
+    {% set airline_open = request.endpoint in [
+      'airlines','airlines_add','fees_select','airline_detail','airlines_edit',
+      'airline_fees','airline_fee_edit'
+    ] %}
+    <details {% if airline_open %}open{% endif %}>
+      <summary id="manageAirlineSummary">Manage Airline</summary>
+      <div class="submenu">
+        <a href="{{ url_for('airlines') }}">Manage Airlines</a>
+        <a href="{{ url_for('airlines_add') }}">Add Airline</a>
+        <a href="{{ url_for('fees_select') }}">Change fees</a>
+      </div>
+    </details>
+
+    <!-- Interné panely -->
+    <button type="button" data-panel="reports">Reports</button>
+    <button type="button" data-panel="variable_rewards">Variable rewards of users</button>
+    <button type="button" data-panel="account_settings">Account settings</button>
+  </div>
+
+  <!-- RIGHT CONTENT -->
+  <div class="content">
+    <!-- ✅ default home -->
+    <div class="card panel active" id="panel-home">
+      <div class="muted">Select an option from the left menu.</div>
+    </div>
+
+    <!-- ✅ Account settings nie je active defaultne -->
+    <div class="card panel" id="panel-account_settings">
+      <h3>Account settings</h3>
+
+      <div class="row">
+        <div class="pillx">Account settings</div>
+        <div class="pillx">→</div>
+        <button class="pillx" type="button" id="openNotifications">Notifications</button>
+      </div>
+
+      <p class="muted" style="margin-top:10px;">
+        Click <strong>Notifications</strong> to set up email recipients. (Napojíme neskôr.)
+      </p>
+
+      <div class="card panel" id="panel-notifications" style="margin-top:12px;">
+        <h3>Notifications</h3>
+        <p class="muted">
+          Set emails for receiving notifications about new users, daily and monthly reports.
+          (Zatiaľ UI – DB neskôr.)
+        </p>
+
+        <label class="muted" for="emails">Emails (one per line):</label>
+        <textarea id="emails" class="emails" placeholder="admin@company.com&#10;ops@company.com"></textarea>
+
+        <div class="btn-row">
+          <button class="btn" type="button" onclick="alert('Saved (placeholder). Implement DB later.')">SAVE</button>
+          <button class="btn secondary" type="button" onclick="document.getElementById('emails').value=''">CLEAR</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card panel" id="panel-reports">
+      <h3>Reports</h3>
+      <p class="muted">Placeholder UI. Implementujeme neskôr.</p>
+    </div>
+
+    <div class="card panel" id="panel-variable_rewards">
+      <h3>Variable rewards of users</h3>
+      <p class="muted">Placeholder UI. Implementujeme neskôr.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    // ✅ Zabrániť “prekliknutiu” summary na iné tlačidlá (niekedy sa to vie stať pri rýchlom kliku)
+    const summary = document.getElementById("manageAirlineSummary");
+    if (summary) {
+      summary.addEventListener("click", (e) => {
+        e.stopPropagation();
+      });
+    }
+
+    // internal panels only
+    const buttons = Array.from(document.querySelectorAll("button[data-panel]"));
+    const panels = Array.from(document.querySelectorAll(".panel"));
+
+    function showPanel(panelId) {
+      panels.forEach(p => p.classList.remove("active"));
+      const el = document.getElementById("panel-" + panelId);
+      if (el) el.classList.add("active");
+
+      buttons.forEach(b => b.classList.remove("active"));
+      const activeBtn = buttons.find(b => b.dataset.panel === panelId);
+      if (activeBtn) activeBtn.classList.add("active");
+    }
+
+    buttons.forEach(btn => btn.addEventListener("click", () => showPanel(btn.dataset.panel)));
+
+    const openNotifications = document.getElementById("openNotifications");
+    if (openNotifications) {
+      openNotifications.addEventListener("click", () => {
+        showPanel("account_settings");
+        const nested = document.getElementById("panel-notifications");
+        if (nested) nested.classList.add("active");
+      });
+    }
+  })();
+</script>
+{% endblock %}

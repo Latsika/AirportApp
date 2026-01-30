@@ -1,0 +1,32 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 700px; }
+  .muted { opacity:.85; font-size:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Add Airline</h2>
+
+<form method="post" action="{{ url_for('airlines_add') }}">
+  <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+
+  <label class="muted">Name*</label>
+  <input name="name" placeholder="Lufthansa" required>
+
+  <label class="muted">Code (IATA/ICAO)</label>
+  <input name="code" placeholder="LH">
+
+  <label class="muted">Country</label>
+  <input name="country" placeholder="Germany">
+
+  <label class="muted" style="display:flex; gap:10px; align-items:center; margin-top:6px;">
+    <input type="checkbox" name="active" checked style="width:auto; margin:0;">
+    Active
+  </label>
+
+  <button type="submit">SAVE</button>
+</form>
+{% endblock %}

@@ -1,0 +1,139 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  /* ✅ Fullscreen pre logs stránku */
+  body {
+    padding: 0 !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+  }
+
+  .container {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    padding: 18px !important;
+  }
+
+  /* topbar nech je stále viditeľný pri scrollovaní */
+  .topbar {
+    position: sticky !important;
+    top: 12px !important;
+    z-index: 60;
+    margin-bottom: 8px;
+  }
+
+  .content-wrap {
+    padding-top: 18px !important; /* menej miesta, keď topbar je sticky */
+  }
+
+  .header {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .pillbox {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 6px;
+  }
+
+  .mini {
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid #334155;
+    background: #0b1220;
+    font-weight: 800;
+  }
+
+  .muted { opacity: .8; font-size: 12px; }
+  .wrap { overflow-wrap: anywhere; word-break: break-word; }
+
+  /* ✅ Tabuľka: horizontálny scroll namiesto lámania písmen */
+  .table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    border-radius: 14px;
+    border: 1px solid #334155;
+    background: #0b1220;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 1100px; /* dôležité: aby sa na mobile radšej scrollovalo */
+  }
+
+  th, td {
+    padding: 12px 12px;
+    border-bottom: 1px solid #334155;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  th { font-weight: 900; opacity: .95; }
+  tr:last-child td { border-bottom: none; }
+
+  .ok { font-weight: 900; }
+  .bad { font-weight: 900; color: #fca5a5; }
+
+  /* mobil: nech table ostane scrollovateľná a čitateľná */
+  @media (max-width: 520px) {
+    .container { padding: 14px !important; }
+    table { min-width: 980px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="header">
+  <h2>Logs</h2>
+  <div class="pillbox">
+    <div class="mini">Full name: <span class="wrap">{{ user.fullname }}</span></div>
+    <div class="mini">Nickname: <span class="wrap">{{ user.nickname }}</span></div>
+    <div class="mini">Role: {{ user.role }}</div>
+  </div>
+  <p class="muted">Showing last 200 auth events for this user (login/logout/session timeout + failed attempts).</p>
+</div>
+
+{% if logs and logs|length > 0 %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>When (UTC)</th>
+        <th>Action</th>
+        <th>Success</th>
+        <th>User-Agent</th>
+        <th>IP</th>
+        <th>Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in logs %}
+      <tr>
+        <td class="wrap">{{ row.created_at_utc }}</td>
+        <td>{{ row.action }}</td>
+        <td>
+          {% if row.success %}
+            <span class="ok">YES</span>
+          {% else %}
+            <span class="bad">NO</span>
+          {% endif %}
+        </td>
+        <td class="wrap">{{ row.user_agent or "-" }}</td>
+        <td class="wrap">{{ row.ip or "-" }}</td>
+        <td class="wrap">{{ row.details or "-" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted">No logs for this user yet.</p>
+{% endif %}
+{% endblock %}

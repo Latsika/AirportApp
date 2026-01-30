@@ -4,51 +4,213 @@
     <meta charset="utf-8">
     <title>Airport App</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+
     <style>
+        :root {
+            --container-max: 420px; /* default pre login a malé stránky */
+        }
+
         * { box-sizing: border-box; }
+
         html, body {
-            margin: 0; padding: 0; height: 100%; width: 100%;
-            font-family: Arial, sans-serif; background: #0f172a;
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            font-family: Arial, sans-serif;
+            background: #0f172a;
             color: #e2e8f0;
         }
-        body { display: flex; justify-content: center; align-items: center; }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 24px;
+        }
+
         .container {
-            width: 100%; max-width: 420px; background: #111827;
-            border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.35);
-            padding: 28px; position: relative;
+            width: min(var(--container-max), 92vw);
+            background: #111827;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,.35);
+            padding: 28px;
+            position: relative;
+
+            /* default scroll pre vyššie stránky */
+            max-height: calc(100vh - 48px);
+            overflow: auto;
         }
-        h1,h2 { margin: 0 0 18px; letter-spacing: .3px; }
+
+        h1, h2 {
+            margin: 0 0 18px;
+            letter-spacing: .3px;
+        }
+
         input, select, button {
-            width: 100%; padding: 12px 14px; margin-bottom: 12px;
-            border-radius: 12px; border: 1px solid #334155;
-            background: #0b1220; color: #e2e8f0; outline: none;
+            width: 100%;
+            padding: 12px 14px;
+            margin-bottom: 12px;
+            border-radius: 12px;
+            border: 1px solid #334155;
+            background: #0b1220;
+            color: #e2e8f0;
+            outline: none;
         }
+
         input:focus, select:focus { border-color: #38bdf8; }
+
         button {
             background: linear-gradient(135deg, #06b6d4, #0ea5e9);
-            cursor: pointer; border: none; font-weight: 600;
+            cursor: pointer;
+            border: none;
+            font-weight: 600;
         }
+
         a { color: #7dd3fc; text-decoration: none; }
         a:hover { text-decoration: underline; }
+
         .flash {
-            background: #1f2937; border: 1px solid #334155; padding: 10px 12px;
-            border-radius: 12px; margin-bottom: 14px; color: #fef08a;
+            background: #1f2937;
+            border: 1px solid #334155;
+            padding: 10px 12px;
+            border-radius: 12px;
+            margin-bottom: 14px;
+            color: #fef08a;
         }
-        .logout {
-            position: absolute; top: 10px; right: 14px;
-        }
+
         .pill {
-            padding: 6px 10px; border-radius: 999px; background: #0b1220; border: 1px solid #334155;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: #0b1220;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            text-decoration: none;
+            line-height: 1;
+        }
+
+        /* Top bar: Back (left) + User menu (right) */
+        .topbar {
+            position: absolute;
+            top: 12px;
+            left: 14px;
+            right: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            pointer-events: none;
+        }
+
+        .topbar > * { pointer-events: auto; }
+
+        .back-btn {
+            width: auto;
+            margin: 0;
+            padding: 8px 12px;
+            background: #0b1220;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            font-weight: 800;
+        }
+
+        .back-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+        .user-menu { position: relative; }
+
+        .user-trigger {
+            width: auto;
+            margin: 0;
+            padding: 8px 12px;
+            background: #0b1220;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            font-weight: 900;
+            font-size: 14px;
+        }
+
+        .user-trigger svg { width: 18px; height: 18px; flex: 0 0 auto; }
+
+        .dropdown {
+            position: absolute;
+            right: 0;
+            top: calc(100% + 8px);
+            min-width: 190px;
+            background: #0b1220;
+            border: 1px solid #334155;
+            border-radius: 14px;
+            box-shadow: 0 18px 40px rgba(0,0,0,.45);
+            padding: 8px;
+            display: none;
+            z-index: 50;
+        }
+
+        .dropdown.open { display: block; }
+
+        .dropdown a {
+            display: block;
+            padding: 10px 12px;
+            border-radius: 12px;
+            color: #e2e8f0;
+            text-decoration: none;
+            font-weight: 800;
+        }
+
+        .dropdown a:hover { background: #111827; text-decoration: none; }
+
+        .dropdown .sep {
+            height: 1px;
+            background: #334155;
+            margin: 6px 4px;
+            border-radius: 999px;
+        }
+
+        .content-wrap { padding-top: 30px; }
+
+        @media (max-width: 480px) {
+            body { padding: 16px; }
+            .container { padding: 20px; max-height: calc(100vh - 32px); }
+            .topbar { left: 10px; right: 10px; }
         }
     </style>
+
+    <!-- ✅ page-specific CSS override musí byť AŽ za base štýlmi -->
+    {% block page_style %}{% endblock %}
 </head>
+
 <body>
 <div class="container">
-    {% if session.get('logged_in') %}
-      <div class="logout">
-        <a class="pill" href="{{ url_for('logout') }}">Logout</a>
-      </div>
-    {% endif %}
+    {% set hide_back = (request.endpoint == 'index') %}
+    <div class="topbar">
+        {% if not hide_back %}
+        <button id="backBtn" class="pill back-btn" type="button">Back</button>
+        {% else %}
+        <span></span>
+        {% endif %}
+
+        {% if session.get('logged_in') %}
+        <div class="user-menu">
+            <button id="userTrigger" class="pill user-trigger" type="button" aria-haspopup="true" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 12c2.761 0 5-2.239 5-5S14.761 2 12 2 7 4.239 7 7s2.239 5 5 5Z"
+                          stroke="currentColor" stroke-width="2" />
+                    <path d="M20 22a8 8 0 1 0-16 0"
+                          stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                </svg>
+                <span>{{ session.get('fullname') or session.get('nickname') or 'User' }}</span>
+            </button>
+
+            <div id="userDropdown" class="dropdown" role="menu" aria-label="User menu">
+                <a href="{{ url_for('profile') }}" role="menuitem">My profile</a>
+                <a href="{{ url_for('change_password') }}" role="menuitem">Change password</a>
+                <div class="sep"></div>
+                <a href="{{ url_for('logout') }}" role="menuitem">Log out</a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
 
     {% with messages = get_flashed_messages() %}
         {% if messages %}
@@ -56,14 +218,45 @@
         {% endif %}
     {% endwith %}
 
-    {% block content %}{% endblock %}
+    <div class="content-wrap">
+        {% block content %}{% endblock %}
+    </div>
 </div>
 
-{% block csrf %}
-<!-- CSRF helper for forms -->
-{% if not session.get('csrf_token') %}
-  {% set _ = session.update({'csrf_token': 'placeholder'}) %}
-{% endif %}
-{% endblock %}
+<script>
+    (function () {
+        const backBtn = document.getElementById("backBtn");
+        if (backBtn) {
+            if (window.history.length <= 1) backBtn.disabled = true;
+            backBtn.addEventListener("click", function () { window.history.back(); });
+        }
+
+        const trigger = document.getElementById("userTrigger");
+        const dropdown = document.getElementById("userDropdown");
+
+        function closeDropdown() {
+            if (!dropdown || !trigger) return;
+            dropdown.classList.remove("open");
+            trigger.setAttribute("aria-expanded", "false");
+        }
+
+        function toggleDropdown() {
+            if (!dropdown || !trigger) return;
+            const isOpen = dropdown.classList.toggle("open");
+            trigger.setAttribute("aria-expanded", String(isOpen));
+        }
+
+        if (trigger && dropdown) {
+            trigger.addEventListener("click", function (e) {
+                e.stopPropagation();
+                toggleDropdown();
+            });
+            document.addEventListener("click", note => closeDropdown());
+            document.addEventListener("keydown", function (e) {
+                if (e.key === "Escape") closeDropdown();
+            });
+        }
+    })();
+</script>
 </body>
 </html>
