@@ -2,7 +2,7 @@
 
 {% block page_style %}
 <style>
-  :root { --container-max: 900px; }
+  :root { --container-max: 980px; }
 
   table {
     width: 100%;
@@ -20,18 +20,10 @@
     vertical-align: top;
   }
 
-  th {
-    font-weight: 900;
-    opacity: 0.95;
-  }
-
+  th { font-weight: 900; opacity: 0.95; }
   tr:last-child td { border-bottom: none; }
 
-  .actions {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
   .btn-small {
     width: auto;
@@ -51,26 +43,37 @@
 
   .btn-small:hover { background: #0f172a; text-decoration: none; }
 
-  .danger {
-    border-color: #7f1d1d;
-    background: #2a0f12;
+  .danger { border-color: #7f1d1d; background: #2a0f12; }
+  .danger:hover { background: #3a1418; }
+
+  .approve { border-color:#14532d; background:#052e16; }
+  .approve:hover { background:#064e3b; }
+
+  .tag {
+    display:inline-block;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid #334155;
+    font-weight: 900;
+    font-size: 12px;
+    opacity: .95;
   }
 
-  .danger:hover { background: #3a1418; }
+  .tag.pending { border-color:#92400e; background:#2a1607; }
+  .tag.ok { border-color:#14532d; background:#052e16; }
 
   .muted { opacity: .8; font-size: 12px; }
 
-  @media (max-width: 480px) {
+  @media (max-width: 520px) {
     :root { --container-max: 420px; }
-    th:nth-child(1), td:nth-child(1) { display:none; } /* hide ID on mobile */
+    th:nth-child(1), td:nth-child(1) { display:none; }
   }
 </style>
 {% endblock %}
 
 {% block content %}
 <h2>Users</h2>
-
-<p class="muted">Admin can edit, delete users, or view their login activity.</p>
+<p class="muted">New accounts require approval (Admin/Deputy) before login.</p>
 
 <table>
   <thead>
@@ -79,6 +82,7 @@
       <th>Full name</th>
       <th>Nickname</th>
       <th>Role</th>
+      <th>Status</th>
       <th>Actions</th>
     </tr>
   </thead>
@@ -91,13 +95,35 @@
       <td>{{ u.nickname }}</td>
       <td>{{ u.role }}</td>
       <td>
+        {% if u.approved %}
+          <span class="tag ok">APPROVED</span>
+        {% else %}
+          <span class="tag pending">PENDING</span>
+        {% endif %}
+      </td>
+      <td>
         <div class="actions">
+          {# Approve button only for pending accounts #}
+          {% if not u.approved %}
+            <form method="post"
+                  action="{{ url_for('approve_user', user_id=u.id) }}"
+                  style="margin:0;">
+              <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+              <button class="btn-small approve" type="submit">APPROVE</button>
+            </form>
+          {% endif %}
+
+          {# Tvoje existujúce tlačidlá (ak endpointy existujú) #}
           <a class="btn-small" href="{{ url_for('edit_user', user_id=u.id) }}">EDIT</a>
-          <a class="btn-small danger"
-             href="{{ url_for('delete_user', user_id=u.id) }}"
-             onclick="return confirm('Delete user {{ u.nickname }}?');">
-            DELETE
-          </a>
+
+          <form method="post"
+                action="{{ url_for('delete_user', user_id=u.id) }}"
+                style="margin:0;"
+                onsubmit="return confirm('Delete user {{ u.nickname }}?');">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+            <button class="btn-small danger" type="submit">DELETE</button>
+          </form>
+
           <a class="btn-small" href="{{ url_for('user_logs', user_id=u.id) }}">LOGS</a>
         </div>
       </td>

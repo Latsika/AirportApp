@@ -1,23 +1,48 @@
 {% extends "layout.html" %}
 
 {% block content %}
-<h2>Register</h2>
+<h2>Create account</h2>
+
+<p style="opacity:.85;">
+  After creating an account, it must be approved by Admin/Deputy before you can login.
+</p>
+
 <form method="post" action="{{ url_for('register') }}">
-    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
-    <input type="text" name="fullname" placeholder="Full name" required>
-    <input type="text" name="nickname" placeholder="Nickname" required>
-    <input type="password" name="password" placeholder="Password (8+, letters+digits+special)" required>
+  <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
 
-    <input type="text" name="q1" placeholder="Security question 1" required>
-    <input type="text" name="a1" placeholder="Answer 1" required>
-    <input type="text" name="q2" placeholder="Security question 2" required>
-    <input type="text" name="a2" placeholder="Answer 2" required>
-    <input type="text" name="q3" placeholder="Security question 3" required>
-    <input type="text" name="a3" placeholder="Answer 3" required>
+  <label>Full name</label>
+  <input type="text" name="fullname" required>
 
-    <button type="submit">Create account</button>
+  <label>Nickname</label>
+  <input type="text" name="nickname" required>
+
+  <label>Password</label>
+  <input type="password" name="password" required>
+
+  <hr style="opacity:.25; margin:16px 0;">
+
+  <label>Security question 1</label>
+  <input type="text" name="q1" required>
+
+  <label>Answer 1</label>
+  <input type="text" name="a1" required>
+
+  <label>Security question 2</label>
+  <input type="text" name="q2" required>
+
+  <label>Answer 2</label>
+  <input type="text" name="a2" required>
+
+  <label>Security question 3</label>
+  <input type="text" name="q3" required>
+
+  <label>Answer 3</label>
+  <input type="text" name="a3" required>
+
+  <button class="btn primary" type="submit">CREATE</button>
 </form>
-<div style="text-align:center;">
-  <a href="{{ url_for('index') }}">🔙 Back to Login</a>
+
+<div style="margin-top:10px;">
+  <a href="{{ url_for('index') }}">Back to login</a>
 </div>
 {% endblock %}
