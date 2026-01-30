@@ -441,6 +441,13 @@ def account_settings():
 def notifications():
     return render_template("notifications.html")
 
+@app.get("/sales", endpoint="sales")
+@admin_required
+def sales():
+    # Sales/Predaj budeme robiť neskôr – zatiaľ placeholder, aby fungoval admin_hub.html
+    return render_template("sales.html")
+
+
 
 # Users management (existing)
 @app.get("/users", endpoint="users")
