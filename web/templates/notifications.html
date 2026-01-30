@@ -1,0 +1,17 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<h2>Notifications</h2>
+<p style="opacity:.85;">Set emails for receiving notifications (placeholder – DB napojíme neskôr).</p>
+
+<div style="max-width:900px;">
+  <label style="opacity:.85;">Emails (one per line):</label>
+  <textarea style="width:100%; min-height:120px; margin-top:8px;"
+            placeholder="admin@company.com&#10;ops@company.com"></textarea>
+
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+    <button class="pill" type="button" onclick="alert('Saved (placeholder). Implement DB later.')">SAVE</button>
+    <button class="pill" type="button" onclick="location.href='{{ url_for('account_settings') }}'">BACK</button>
+  </div>
+</div>
+{% endblock %}
