@@ -1,8 +1,88 @@
 {% extends "layout.html" %}
 
+{% block page_style %}
+<style>
+  :root { --container-max: 1100px; }
+
+  .title {
+    text-align: center;
+    font-size: 36px;
+    font-weight: 1000;
+    margin: 0 0 14px;
+    letter-spacing: .6px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+
+  .menu {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 16px;
+    background: #0b1220;
+    border: 1px solid #334155;
+  }
+
+  .menu a {
+    width: 100%;
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid #334155;
+    background: #111827;
+    color: #e2e8f0;
+    font-weight: 900;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: left;
+    display: block;
+  }
+
+  .menu a:hover {
+    background: #0f172a;
+    text-decoration: none;
+  }
+  .menu a.active {
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 2px rgba(56,189,248,.2);
+  }
+
+  .card {
+    padding: 16px;
+    border-radius: 18px;
+    background: #0b1220;
+    border: 1px solid #334155;
+  }
+
+  .muted { opacity: .85; font-size: 13px; line-height: 1.4; }
+
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-<h2>Sales / Predaj</h2>
-<p style="opacity:.85;">
-  Placeholder – napojenie na Airlines/Fees spravíme neskôr.
-</p>
+<h2 class="title">Sale Page</h2>
+
+<div class="grid">
+  <div class="menu">
+    <a class="active" href="{{ url_for('sales') }}">Sale</a>
+    <a href="{{ url_for('sale_new') }}">New Sale</a>
+    <a href="{{ url_for('sales_list') }}">Sales List</a>
+    <a href="{{ url_for('reports') }}">Reports</a>
+  </div>
+
+  <div class="card">
+    <div class="muted">
+      Select an option from the left menu.<br>
+      Back now moves one level up in the app hierarchy.
+    </div>
+  </div>
+</div>
 {% endblock %}

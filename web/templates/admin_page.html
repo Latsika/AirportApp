@@ -12,59 +12,6 @@
     letter-spacing: .6px;
   }
 
-  .grid {
-    display: grid;
-    grid-template-columns: 320px 1fr;
-    gap: 16px;
-    align-items: start;
-  }
-
-  .menu {
-    display: grid;
-    gap: 10px;
-    padding: 12px;
-    border-radius: 16px;
-    background: #0b1220;
-    border: 1px solid #334155;
-  }
-
-  .menu a, .menu summary {
-    width: 100%;
-    margin: 0;
-    padding: 12px 14px;
-    border-radius: 14px;
-    border: 1px solid #334155;
-    background: #111827;
-    color: #e2e8f0;
-    font-weight: 900;
-    cursor: pointer;
-    text-decoration: none;
-    text-align: left;
-    display: block;
-  }
-
-  .menu a:hover, .menu summary:hover {
-    background: #0f172a;
-    text-decoration: none;
-  }
-
-  details { margin: 0; }
-  summary { list-style: none; }
-  summary::-webkit-details-marker { display: none; }
-
-  .submenu {
-    display: grid;
-    gap: 8px;
-    padding-left: 10px;
-    margin-top: 8px;
-  }
-
-  .submenu a {
-    font-weight: 800;
-    opacity: .95;
-    padding: 10px 12px;
-  }
-
   .card {
     padding: 16px;
     border-radius: 18px;
@@ -74,53 +21,16 @@
 
   .muted { opacity: .85; font-size: 13px; line-height: 1.4; }
 
-  @media (max-width: 900px) {
-    .grid { grid-template-columns: 1fr; }
-  }
 </style>
 {% endblock %}
 
 {% block content %}
 <h2 class="title">ADMIN page</h2>
 
-<div class="grid">
-  <!-- LEFT NAV -->
-  <div class="menu">
-    <a href="{{ url_for('users') }}">Manage users</a>
-
-    {% set airline_open = request.endpoint in [
-      'airlines','airlines_add','fees_select',
-      'airline_detail','airlines_edit',
-      'airline_fees','airline_fee_edit'
-    ] %}
-    <details {% if airline_open %}open{% endif %}>
-      <summary id="manageAirlineSummary">Manage Airline</summary>
-      <div class="submenu">
-        <a href="{{ url_for('airlines') }}">Manage Airlines</a>
-        <a href="{{ url_for('airlines_add') }}">Add Airline</a>
-        <a href="{{ url_for('fees_select') }}">Change fees</a>
-      </div>
-    </details>
-
-    <a href="{{ url_for('reports') }}">Reports</a>
-    <a href="{{ url_for('variable_rewards') }}">Variable rewards of users</a>
-    <a href="{{ url_for('account_settings') }}">Account settings</a>
-  </div>
-
-  <!-- RIGHT INFO (NO PANELS) -->
-  <div class="card">
-    <div class="muted">
-      Select an option from the left menu.<br>
-      Each option opens a separate page. Use <strong>Back</strong> to return.
-    </div>
+<div class="card">
+  <div class="muted">
+    Select an option from the left menu.<br>
+    Back now moves one level up in the app hierarchy.
   </div>
 </div>
-
-<script>
-  // Prevent any weird click bubbling from summary
-  (function () {
-    const s = document.getElementById("manageAirlineSummary");
-    if (s) s.addEventListener("click", (e) => e.stopPropagation());
-  })();
-</script>
 {% endblock %}

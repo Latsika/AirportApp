@@ -29,6 +29,70 @@
             padding: 24px;
         }
 
+        .app-shell {
+            display: flex;
+            gap: 16px;
+            width: 100%;
+            max-width: 1400px;
+            align-items: stretch;
+            justify-content: center;
+        }
+
+        .sidebar {
+            width: 260px;
+            flex: 0 0 260px;
+            display: grid;
+            gap: 10px;
+            padding: 12px;
+            border-radius: 16px;
+            background: #0b1220;
+            border: 1px solid #334155;
+            height: calc(100vh - 48px);
+            position: sticky;
+            top: 24px;
+            overflow: auto;
+            align-content: start;
+        }
+
+        .sidebar a, .sidebar summary {
+            width: 100%;
+            margin: 0;
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid #334155;
+            background: #111827;
+            color: #e2e8f0;
+            font-weight: 900;
+            cursor: pointer;
+            text-decoration: none;
+            text-align: left;
+            display: flex;
+            align-items: center;
+            min-height: 48px;
+        }
+
+        .sidebar a:hover, .sidebar summary:hover {
+            background: #0f172a;
+            text-decoration: none;
+        }
+
+        .sidebar details { margin: 0; }
+        .sidebar summary { list-style: none; }
+        .sidebar summary::-webkit-details-marker { display: none; }
+
+        .sidebar .submenu {
+            display: grid;
+            gap: 8px;
+            padding-left: 10px;
+            margin-top: 8px;
+        }
+
+        .sidebar .submenu a {
+            font-weight: 800;
+            opacity: .95;
+            padding: 10px 12px;
+        }
+
         .container {
             width: min(var(--container-max), 92vw);
             background: #111827;
@@ -169,6 +233,16 @@
 
         .content-wrap { padding-top: 30px; }
 
+        @media (max-width: 900px) {
+            .app-shell { flex-direction: column; }
+            .sidebar {
+                position: static;
+                width: 100%;
+                flex: 0 0 auto;
+                height: auto;
+            }
+        }
+
         @media (max-width: 480px) {
             body { padding: 16px; }
             .container { padding: 20px; max-height: calc(100vh - 32px); }
@@ -181,11 +255,101 @@
 </head>
 
 <body>
+{% set show_sidebar = session.get('logged_in') and session.get('role') == 'Admin' and request.endpoint not in ['admin_hub','sales','reports','reports_daily','reports_monthly','reports_custom','sale_new','sales_list','sale_edit'] %}
+{% set endpoint = request.endpoint %}
+{% set back_url = None %}
+{% if endpoint in ['edit_user','approve_user','delete_user','user_logs','reassign_admin','reset_user_password','reset_user_questions'] %}
+    {% set back_url = url_for('users') %}
+{% elif endpoint in ['users'] %}
+    {% set back_url = url_for('admin_page') %}
+{% elif endpoint in ['airport_service_fee_edit','airport_service_fee_delete','airport_service_fees_add'] %}
+    {% set back_url = url_for('airport_service_fees') %}
+{% elif endpoint in ['airport_service_fees'] %}
+    {% set back_url = url_for('admin_page') %}
+{% elif endpoint in ['airlines_add','fees_select','airline_detail','airlines_edit','airline_fees','airline_fee_edit'] %}
+    {% set back_url = url_for('airlines') %}
+{% elif endpoint in ['airlines'] %}
+    {% set back_url = url_for('admin_page') %}
+{% elif endpoint in ['reports'] %}
+    {% set back_url = url_for('sales') %}
+{% elif endpoint in ['reports_daily','reports_monthly','reports_custom'] %}
+    {% set back_url = url_for('reports') %}
+{% elif endpoint in ['sale_new','sales_list','sale_edit','sales_delete'] %}
+    {% set back_url = url_for('sales') %}
+{% elif endpoint in ['sales'] %}
+    {% set back_url = url_for('admin_hub') %}
+{% elif endpoint in ['variable_rewards','account_settings'] %}
+    {% set back_url = url_for('admin_page') %}
+{% elif endpoint in ['admin_page'] %}
+    {% set back_url = url_for('admin_hub') %}
+{% elif endpoint in ['change_password'] %}
+    {% set back_url = url_for('profile') %}
+{% elif endpoint in ['profile'] %}
+    {% set back_url = url_for('index') %}
+{% elif session.get('logged_in') %}
+    {% set back_url = url_for('profile') %}
+{% else %}
+    {% set back_url = None %}
+{% endif %}
+
+<div class="app-shell">
+    {% if show_sidebar %}
+    {% set users_open = endpoint in ['users','edit_user','approve_user','delete_user','user_logs','reassign_admin','reset_user_password','reset_user_questions'] %}
+    {% set airline_open = endpoint in [
+      'airlines','airlines_add','fees_select',
+      'airline_detail','airlines_edit',
+      'airline_fees','airline_fee_edit'
+    ] %}
+    {% set reports_open = endpoint in ['reports'] %}
+    {% set rewards_open = endpoint in ['variable_rewards'] %}
+    {% set settings_open = endpoint in ['account_settings'] %}
+    <nav class="sidebar" aria-label="Admin menu">
+        <details {% if users_open %}open{% endif %}>
+            <summary>Manage users</summary>
+            <div class="submenu">
+                <a href="{{ url_for('users') }}">Users list</a>
+            </div>
+        </details>
+
+        <details {% if airline_open %}open{% endif %}>
+            <summary>Manage Airline</summary>
+            <div class="submenu">
+                <a href="{{ url_for('airlines') }}">Manage Airlines</a>
+                <a href="{{ url_for('airlines_add') }}">Add Airline</a>
+                <a href="{{ url_for('fees_select') }}">Change fees</a>
+            </div>
+        </details>
+
+        <a href="{{ url_for('airport_service_fees') }}">Manage Airport Service Fees</a>
+
+        <details {% if reports_open %}open{% endif %}>
+            <summary>Reports</summary>
+            <div class="submenu">
+                <a href="{{ url_for('reports') }}">Open Reports</a>
+            </div>
+        </details>
+
+        <details {% if rewards_open %}open{% endif %}>
+            <summary>Variable rewards of users</summary>
+            <div class="submenu">
+                <a href="{{ url_for('variable_rewards') }}">Open Variable rewards</a>
+            </div>
+        </details>
+
+        <details {% if settings_open %}open{% endif %}>
+            <summary>Account settings</summary>
+            <div class="submenu">
+                <a href="{{ url_for('account_settings') }}">Open Account settings</a>
+            </div>
+        </details>
+    </nav>
+    {% endif %}
+
 <div class="container">
     {% set hide_back = (request.endpoint == 'index') %}
     <div class="topbar">
         {% if not hide_back %}
-        <button id="backBtn" class="pill back-btn" type="button">Back</button>
+        <button id="backBtn" class="pill back-btn" type="button" data-back-url="{{ back_url or '' }}">Back</button>
         {% else %}
         <span></span>
         {% endif %}
@@ -222,13 +386,21 @@
         {% block content %}{% endblock %}
     </div>
 </div>
+</div>
 
 <script>
     (function () {
         const backBtn = document.getElementById("backBtn");
         if (backBtn) {
-            if (window.history.length <= 1) backBtn.disabled = true;
-            backBtn.addEventListener("click", function () { window.history.back(); });
+            const backUrl = backBtn.getAttribute("data-back-url") || "";
+            if (!backUrl && window.history.length <= 1) backBtn.disabled = true;
+            backBtn.addEventListener("click", function () {
+                if (backUrl) {
+                    window.location.href = backUrl;
+                } else {
+                    window.history.back();
+                }
+            });
         }
 
         const trigger = document.getElementById("userTrigger");

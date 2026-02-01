@@ -2,19 +2,27 @@
 
 {% block content %}
 <h2>Forgot password</h2>
-<form method="post" action="{{ url_for('forgot') }}">
+<form method="post" action="{{ url_for('forgot') }}" autocomplete="off">
     <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
-    <input type="text" name="nickname" placeholder="Nickname" required>
+    <input type="text" name="nickname" placeholder="Nickname" value="{{ nickname or '' }}" {% if q1 %}readonly{% endif %} required>
 
-    <input type="text" name="a1" placeholder="Answer to question 1" required>
-    <input type="text" name="a2" placeholder="Answer to question 2" required>
-    <input type="text" name="a3" placeholder="Answer to question 3" required>
+    {% if q1 %}
+      <label>{{ q1 }}</label>
+      <input type="text" name="a1" placeholder="Answer to question 1" autocomplete="off" required>
 
-    <input type="password" name="new_password" placeholder="New password (8+, letters+digits+special)" required>
-    <button type="submit">Reset</button>
+      <label>{{ q2 }}</label>
+      <input type="text" name="a2" placeholder="Answer to question 2" autocomplete="off" required>
+
+      <label>{{ q3 }}</label>
+      <input type="text" name="a3" placeholder="Answer to question 3" autocomplete="off" required>
+
+      <input type="password" name="new_password" placeholder="New password (8+, letters+digits+special)" autocomplete="new-password" required>
+      <button type="submit">Reset</button>
+    {% else %}
+      <button type="submit">Load questions</button>
+    {% endif %}
 </form>
 <div style="text-align:center;">
   <a href="{{ url_for('index') }}">🔙 Back to Login</a>
 </div>
 {% endblock %}
-

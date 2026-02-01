@@ -116,6 +116,20 @@
           {# Tvoje existujúce tlačidlá (ak endpointy existujú) #}
           <a class="btn-small" href="{{ url_for('edit_user', user_id=u.id) }}">EDIT</a>
 
+          {% if session.get("role") == "Admin" %}
+            <form method="post"
+                  action="{{ url_for('reset_user_password', user_id=u.id) }}"
+                  style="margin:0;"
+                  onsubmit="return confirm('Reset password for {{ u.nickname }}?');">
+              <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+              <button class="btn-small" type="submit">RESET PASSWORD</button>
+            </form>
+
+            <a class="btn-small" href="{{ url_for('reset_user_questions', user_id=u.id) }}">
+              RESET QUESTIONS
+            </a>
+          {% endif %}
+
           <form method="post"
                 action="{{ url_for('delete_user', user_id=u.id) }}"
                 style="margin:0;"

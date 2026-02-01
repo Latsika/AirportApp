@@ -8,15 +8,18 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from io import BytesIO
 from functools import wraps
 from secrets import token_urlsafe
 from typing import Optional
 
 import smtplib
+import csv
 from flask import (
     Flask,
     abort,
     flash,
+    make_response,
     redirect,
     render_template,
     request,
@@ -38,6 +41,13 @@ from database.db import (  # noqa: E402
     set_app_state,
 )
 from utils.security import hash_password, verify_password_and_upgrade  # noqa: E402
+from reportlab.lib.pagesizes import letter, A4, landscape
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.charts.textlabels import Label
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-please-change")
@@ -63,10 +73,502 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _today_utc_date() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def _month_utc() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+def _report_rows_by_airline(conn, date_filter: str, is_month: bool, source: str):
+    cur = conn.cursor()
+    if is_month:
+        cur.execute(
+            """
+            SELECT a.id, a.name, a.code,
+                   CASE
+                       WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_key, si.fee_key)
+                       WHEN si.fee_source = 'airport' THEN COALESCE(apf.fee_key, si.fee_key)
+                       ELSE COALESCE(si.fee_key, '')
+                   END AS fee_key,
+                   CASE
+                       WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_name, si.fee_name, si.fee_key)
+                       WHEN si.fee_source = 'airport' THEN COALESCE(apf.fee_name, si.fee_name, si.fee_key)
+                       ELSE COALESCE(si.fee_name, si.fee_key)
+                   END AS fee_name,
+                   SUM(si.quantity) AS qty, SUM(si.total_amount) AS total,
+                   SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
+                   SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
+            LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
+            WHERE si.fee_source = ? AND substr(s.sold_at_utc, 1, 7) = ?
+            GROUP BY a.id, 4, 5
+            ORDER BY a.name COLLATE NOCASE ASC, 5 COLLATE NOCASE ASC
+            """,
+            (source, date_filter),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT a.id, a.name, a.code,
+                   CASE
+                       WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_key, si.fee_key)
+                       WHEN si.fee_source = 'airport' THEN COALESCE(apf.fee_key, si.fee_key)
+                       ELSE COALESCE(si.fee_key, '')
+                   END AS fee_key,
+                   CASE
+                       WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_name, si.fee_name, si.fee_key)
+                       WHEN si.fee_source = 'airport' THEN COALESCE(apf.fee_name, si.fee_name, si.fee_key)
+                       ELSE COALESCE(si.fee_name, si.fee_key)
+                   END AS fee_name,
+                   SUM(si.quantity) AS qty, SUM(si.total_amount) AS total,
+                   SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
+                   SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
+            LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
+            WHERE si.fee_source = ? AND date(s.sold_at_utc) = ?
+            GROUP BY a.id, 4, 5
+            ORDER BY a.name COLLATE NOCASE ASC, 5 COLLATE NOCASE ASC
+            """,
+            (source, date_filter),
+        )
+    return cur.fetchall()
+
+
+def _report_totals_by_airline(conn, date_filter: str, is_month: bool, source: str):
+    cur = conn.cursor()
+    if is_month:
+        cur.execute(
+            """
+            SELECT a.id, a.name, a.code, SUM(si.total_amount) AS total,
+                   SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
+                   SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            JOIN airlines a ON a.id = s.airline_id
+            WHERE si.fee_source = ? AND substr(s.sold_at_utc, 1, 7) = ?
+            GROUP BY a.id
+            ORDER BY a.name COLLATE NOCASE ASC
+            """,
+            (source, date_filter),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT a.id, a.name, a.code, SUM(si.total_amount) AS total,
+                   SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
+                   SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            JOIN airlines a ON a.id = s.airline_id
+            WHERE si.fee_source = ? AND date(s.sold_at_utc) = ?
+            GROUP BY a.id
+            ORDER BY a.name COLLATE NOCASE ASC
+            """,
+            (source, date_filter),
+        )
+    return cur.fetchall()
+
+
+def _report_total_all(conn, date_filter: str, is_month: bool, source: str):
+    cur = conn.cursor()
+    if is_month:
+        cur.execute(
+            """
+            SELECT SUM(si.total_amount) AS total,
+                   SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
+                   SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            WHERE si.fee_source = ? AND substr(s.sold_at_utc, 1, 7) = ?
+            """,
+            (source, date_filter),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT SUM(si.total_amount) AS total,
+                   SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
+                   SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            WHERE si.fee_source = ? AND date(s.sold_at_utc) = ?
+            """,
+            (source, date_filter),
+        )
+    row = cur.fetchone()
+    return {
+        "total": float(row["total"] or 0),
+        "cash_total": float(row["cash_total"] or 0),
+        "card_total": float(row["card_total"] or 0),
+    }
+
+
+def _load_custom_report_filters():
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, code FROM airlines ORDER BY name COLLATE NOCASE ASC")
+        airlines = cur.fetchall()
+        cur.execute(
+            "SELECT id, fee_key, fee_name FROM airline_fees ORDER BY fee_name COLLATE NOCASE ASC"
+        )
+        airline_items = cur.fetchall()
+        cur.execute(
+            "SELECT id, fee_key, fee_name FROM airport_service_fees ORDER BY fee_name COLLATE NOCASE ASC"
+        )
+        airport_items = cur.fetchall()
+        cur.execute(
+            "SELECT id, fullname, nickname FROM users ORDER BY fullname COLLATE NOCASE ASC"
+        )
+        sellers = cur.fetchall()
+    return airlines, airline_items, airport_items, sellers
+
+
+def _build_custom_report(filters: dict):
+    params = []
+    where = ["date(s.sold_at_utc) BETWEEN ? AND ?"]
+    params.extend([filters["date_from"], filters["date_to"]])
+
+    if filters["airline_ids"]:
+        placeholders = ",".join(["?"] * len(filters["airline_ids"]))
+        where.append(f"s.airline_id IN ({placeholders})")
+        params.extend(filters["airline_ids"])
+
+    if filters["payment_methods"]:
+        placeholders = ",".join(["?"] * len(filters["payment_methods"]))
+        where.append(f"s.payment_method IN ({placeholders})")
+        params.extend(filters["payment_methods"])
+
+    if filters["sold_by_ids"]:
+        placeholders = ",".join(["?"] * len(filters["sold_by_ids"]))
+        where.append(f"s.created_by IN ({placeholders})")
+        params.extend(filters["sold_by_ids"])
+
+    item_conditions = []
+    sources = []
+    if filters["airline_ids"]:
+        sources.append("airline")
+    if filters["include_airport"]:
+        sources.append("airport")
+    if filters["include_ticket"]:
+        sources.append("ticket")
+    if filters["airline_item_ids"]:
+        placeholders = ",".join(["?"] * len(filters["airline_item_ids"]))
+        item_conditions.append(f"(si.fee_source = 'airline' AND si.fee_id IN ({placeholders}))")
+        params.extend(filters["airline_item_ids"])
+    if filters["airport_item_ids"]:
+        placeholders = ",".join(["?"] * len(filters["airport_item_ids"]))
+        item_conditions.append(f"(si.fee_source = 'airport' AND si.fee_id IN ({placeholders}))")
+        params.extend(filters["airport_item_ids"])
+    if filters["include_ticket"]:
+        item_conditions.append("(si.fee_source = 'ticket')")
+
+    if sources:
+        placeholders = ",".join(["?"] * len(sources))
+        where.append(f"si.fee_source IN ({placeholders})")
+        params.extend(sources)
+
+    if item_conditions:
+        where.append("(" + " OR ".join(item_conditions) + ")")
+    elif not sources:
+        return [], {"dates": [], "series": []}
+
+    sql = f"""
+        SELECT
+            s.id AS sale_id,
+            a.name AS airline_name,
+            a.code AS airline_code,
+            s.sold_at_utc,
+            s.payment_method,
+            u.fullname AS sold_by_name,
+            u.nickname AS sold_by_nick,
+            si.fee_source,
+            CASE
+                WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_key, si.fee_key)
+                WHEN si.fee_source = 'airport' THEN COALESCE(apf.fee_key, si.fee_key)
+                ELSE COALESCE(si.fee_key, '')
+            END AS fee_key,
+            CASE
+                WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_name, si.fee_name, si.fee_key)
+                WHEN si.fee_source = 'airport' THEN COALESCE(apf.fee_name, si.fee_name, si.fee_key)
+                ELSE COALESCE(si.fee_name, si.fee_key)
+            END AS fee_name,
+            si.quantity,
+            si.total_amount
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        JOIN airlines a ON a.id = s.airline_id
+        LEFT JOIN users u ON u.id = s.created_by
+        LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
+        LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
+        WHERE {" AND ".join(where)}
+        ORDER BY s.sold_at_utc DESC, a.name COLLATE NOCASE ASC, fee_name COLLATE NOCASE ASC
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+
+    # build date series for chart (Y=quantity, X=date)
+    try:
+        start_date = datetime.fromisoformat(filters["date_from"]).date()
+        end_date = datetime.fromisoformat(filters["date_to"]).date()
+    except ValueError:
+        start_date = datetime.now(timezone.utc).date()
+        end_date = start_date
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    date_list = []
+    d = start_date
+    while d <= end_date:
+        date_list.append(d.isoformat())
+        d += timedelta(days=1)
+
+    series = {}
+    for r in rows:
+        date_key = (r["sold_at_utc"] or "")[:10]
+        if not date_key:
+            continue
+        if r["fee_source"] == "airport":
+            series_key = f"Airport - {r['fee_key']}" if r["fee_key"] else "Airport"
+        elif filters["airline_ids"] and r["fee_key"]:
+            series_key = f"{r['airline_code'] or r['airline_name']} - {r['fee_key']}"
+        elif r["fee_key"]:
+            series_key = r["fee_key"]
+        else:
+            series_key = r["fee_name"] or "Item"
+        if series_key not in series:
+            series[series_key] = {k: 0 for k in date_list}
+        series[series_key][date_key] = series[series_key].get(date_key, 0) + int(r["quantity"] or 0)
+
+    series_list = []
+    for k, v in series.items():
+        series_list.append({"label": k, "values": [v.get(d, 0) for d in date_list]})
+
+    chart_payload = {"dates": date_list, "series": series_list}
+    return rows, chart_payload
+
+
+def _custom_report_to_pdf(title: str, rows, chart_data):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=36,
+        rightMargin=36,
+        topMargin=30,
+        bottomMargin=30,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        fontSize=16,
+        leading=20,
+        spaceAfter=12,
+        textColor=colors.black,
+    )
+    section_style = ParagraphStyle(
+        "SectionTitle",
+        parent=styles["Heading2"],
+        fontSize=12,
+        leading=14,
+        spaceBefore=6,
+        spaceAfter=6,
+        textColor=colors.black,
+    )
+    normal_style = ParagraphStyle(
+        "NormalCell", parent=styles["BodyText"], fontSize=9, leading=11, textColor=colors.black
+    )
+
+    def wrap_table_data(data):
+        wrapped = []
+        for row in data:
+            wrapped.append([Paragraph(str(cell), normal_style) for cell in row])
+        return wrapped
+
+    def make_table(data, col_widths):
+        t = Table(wrap_table_data(data), colWidths=col_widths)
+        style = TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.black),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e2e8f0")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ]
+        )
+        t.setStyle(style)
+        return t
+
+    elements = [Paragraph(title, title_style)]
+    elements.append(Paragraph("Filtered Items", section_style))
+
+    header = [
+        "No.",
+        "Airline",
+        "Item Key",
+        "Item Name",
+        "Qty",
+        "Total",
+        "Payment",
+        "Sold By",
+        "Sold At",
+    ]
+    data_rows = []
+    for idx, r in enumerate(rows, start=1):
+        airline = f"{r['airline_name']}{' (' + r['airline_code'] + ')' if r['airline_code'] else ''}"
+        sold_by = r["sold_by_name"] or r["sold_by_nick"] or "-"
+        sold_at = (r["sold_at_utc"] or "")[:19].replace("T", " ")
+        data_rows.append(
+            [
+                idx,
+                airline,
+                r["fee_key"] or "",
+                r["fee_name"] or "",
+                r["quantity"],
+                r["total_amount"],
+                r["payment_method"],
+                sold_by,
+                sold_at,
+            ]
+        )
+    col_widths = [
+        doc.width * 0.05,
+        doc.width * 0.16,
+        doc.width * 0.10,
+        doc.width * 0.20,
+        doc.width * 0.06,
+        doc.width * 0.09,
+        doc.width * 0.09,
+        doc.width * 0.12,
+        doc.width * 0.13,
+    ]
+    elements.append(make_table([header] + data_rows, col_widths))
+    elements.append(Spacer(1, 12))
+
+    if chart_data and chart_data.get("series"):
+        elements.append(Paragraph("Chart", section_style))
+        from reportlab.graphics.charts.lineplots import LinePlot
+
+        drawing = Drawing(doc.width, 300)
+        chart = LinePlot()
+        chart.x = 40
+        chart.y = 40
+        chart.height = 220
+        chart.width = doc.width - 80
+
+        dates = chart_data.get("dates", [])
+        series = chart_data.get("series", [])[:6]
+        chart.data = [
+            [(i, v) for i, v in enumerate(s["values"])]
+            for s in series
+        ]
+        max_val = max((v for s in series for v in s["values"]), default=0)
+        chart.yValueAxis.valueMin = 0
+        chart.yValueAxis.valueMax = max_val * 1.2 if max_val else 1
+        chart.yValueAxis.valueStep = max(1, int(chart.yValueAxis.valueMax / 5))
+        chart.xValueAxis.valueMin = 0
+        chart.xValueAxis.valueMax = max(1, len(dates) - 1)
+        chart.xValueAxis.valueSteps = list(range(len(dates)))
+        chart.xValueAxis.labelTextFormat = lambda v: dates[int(v)] if int(v) < len(dates) else ""
+
+        colors_list = [
+            colors.HexColor("#0ea5e9"),
+            colors.HexColor("#10b981"),
+            colors.HexColor("#f59e0b"),
+            colors.HexColor("#ef4444"),
+            colors.HexColor("#8b5cf6"),
+            colors.HexColor("#14b8a6"),
+        ]
+        for idx, _ in enumerate(series):
+            chart.lines[idx].strokeColor = colors_list[idx % len(colors_list)]
+            chart.lines[idx].strokeWidth = 2
+
+        drawing.add(chart)
+        label = Label()
+        label.setOrigin(0, 270)
+        label.setText("Quantity by date (up to 6 series)")
+        label.fontSize = 9
+        drawing.add(label)
+        elements.append(drawing)
+
+        legend_rows = [["Series", "Color"]]
+        for idx, s in enumerate(series):
+            legend_rows.append([s["label"], ""])
+        legend = Table(legend_rows, colWidths=[doc.width * 0.7, doc.width * 0.3])
+        legend.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e2e8f0")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ]
+            )
+        )
+        for idx in range(1, len(legend_rows)):
+            legend.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (1, idx), (1, idx), colors_list[(idx - 1) % len(colors_list)]),
+                    ]
+                )
+            )
+        elements.append(legend)
+
+    doc.build(elements)
+    return buffer.getvalue()
+
+
+def _build_report_payload(date_filter: str, is_month: bool):
+    with get_connection() as conn:
+        airline_items = _report_rows_by_airline(conn, date_filter, is_month, "airline")
+        airport_items = _report_rows_by_airline(conn, date_filter, is_month, "airport")
+        airline_totals = _report_totals_by_airline(conn, date_filter, is_month, "airline")
+        airport_totals = _report_totals_by_airline(conn, date_filter, is_month, "airport")
+        airline_all = _report_total_all(conn, date_filter, is_month, "airline")
+        airport_all = _report_total_all(conn, date_filter, is_month, "airport")
+        combined = {
+            "total": airline_all["total"] + airport_all["total"],
+            "cash_total": airline_all["cash_total"] + airport_all["cash_total"],
+            "card_total": airline_all["card_total"] + airport_all["card_total"],
+        }
+    return {
+        "airline_items": airline_items,
+        "airport_items": airport_items,
+        "airline_totals": airline_totals,
+        "airport_totals": airport_totals,
+        "airline_all": airline_all,
+        "airport_all": airport_all,
+        "combined_all": combined,
+    }
+
+
 def _redirect_after_login(role: str | None):
     if role in {"Admin", "Deputy"}:
         return redirect(url_for("admin_hub"))
     return redirect(url_for("profile"))
+
+
+def _generate_temp_password() -> str:
+    while True:
+        candidate = token_urlsafe(9)
+        if PASSWORD_RE.match(candidate):
+            return candidate
 
 
 def login_required(f):
@@ -407,12 +909,21 @@ def forgot():
     a1 = request.form.get("a1") or ""
     a2 = request.form.get("a2") or ""
     a3 = request.form.get("a3") or ""
+    new_password = request.form.get("new_password") or ""
+
+    if not (a1 and a2 and a3 and new_password):
+        return render_template(
+            "forgot.html",
+            nickname=nickname,
+            q1=user["q1"],
+            q2=user["q2"],
+            q3=user["q3"],
+        )
 
     if a1 != (user["a1"] or "") or a2 != (user["a2"] or "") or a3 != (user["a3"] or ""):
         flash("❌ Answers do not match.")
         return redirect(url_for("forgot"))
 
-    new_password = request.form.get("new_password") or ""
     if not PASSWORD_RE.match(new_password):
         flash("❌ Password must have min 8 chars and include letters, numbers and symbols.")
         return redirect(url_for("forgot"))
@@ -502,10 +1013,944 @@ def sales():
     return render_template("sales.html")
 
 
+def _load_sale_fee_data():
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, code FROM airlines WHERE active = 1 ORDER BY name COLLATE NOCASE ASC")
+        airlines = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT id, airline_id, fee_key, fee_name, amount, currency, unit
+            FROM airline_fees
+            ORDER BY fee_name COLLATE NOCASE ASC
+            """
+        )
+        airline_fees = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT id, fee_key, fee_name, amount, currency, unit
+            FROM airport_service_fees
+            ORDER BY fee_name COLLATE NOCASE ASC
+            """
+        )
+        airport_fees = cur.fetchall()
+
+    airline_fees_map = {}
+    for f in airline_fees:
+        airline_fees_map.setdefault(f["airline_id"], []).append(
+            {
+                "id": f["id"],
+                "fee_key": f["fee_key"],
+                "fee_name": f["fee_name"],
+                "amount": f["amount"],
+                "currency": f["currency"],
+                "unit": f["unit"],
+            }
+        )
+
+    airport_fees_list = [
+        {
+            "id": f["id"],
+            "fee_key": f["fee_key"],
+            "fee_name": f["fee_name"],
+            "amount": f["amount"],
+            "currency": f["currency"],
+            "unit": f["unit"],
+        }
+        for f in airport_fees
+    ]
+
+    return airlines, airline_fees_map, airport_fees_list
+
+
+@app.route("/sale/new", methods=["GET", "POST"], endpoint="sale_new")
+@admin_required
+def sale_new():
+    if request.method == "GET":
+        airlines, airline_fees_map, airport_fees_list = _load_sale_fee_data()
+        return render_template(
+            "sale_new.html",
+            airlines=airlines,
+            airline_fees_map=airline_fees_map,
+            airport_fees=airport_fees_list,
+        )
+
+    require_csrf()
+    airline_id_raw = request.form.get("airline_id") or ""
+    ticket_qty_raw = request.form.get("ticket_qty") or "0"
+    ticket_amount = _parse_amount(request.form.get("ticket_amount"))
+    payment_method = _sanitize(request.form.get("payment_method")).upper() or "CASH"
+    sale_group_id = _sanitize(request.form.get("sale_group_id")) or None
+
+    try:
+        airline_id = int(airline_id_raw)
+        ticket_qty = max(0, int(ticket_qty_raw))
+    except ValueError:
+        flash("Invalid input.")
+        return redirect(url_for("sale_new"))
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM airlines WHERE id = ?", (airline_id,))
+        if not cur.fetchone():
+            flash("Airline not found.")
+            return redirect(url_for("sale_new"))
+
+        if payment_method not in {"CASH", "CARD"}:
+            flash("Invalid payment method.")
+            return redirect(url_for("sale_new"))
+
+        if not sale_group_id:
+            sale_group_id = token_urlsafe(8)
+
+        now = _utc_now_iso()
+        items = []
+
+        airline_fee_ids = request.form.getlist("airline_fee_id")
+        for fid_raw in airline_fee_ids:
+            try:
+                fid = int(fid_raw)
+            except ValueError:
+                continue
+            qty = max(1, int(request.form.get(f"airline_qty_{fid}") or "1"))
+            cur.execute(
+                """
+                SELECT id, fee_key, fee_name, amount, currency
+                FROM airline_fees
+                WHERE id = ? AND airline_id = ?
+                """,
+                (fid, airline_id),
+            )
+            fee = cur.fetchone()
+            if not fee:
+                continue
+            amount = float(fee["amount"] or 0)
+            total = round(amount * qty, 4)
+            items.append(
+                {
+                    "fee_source": "airline",
+                    "fee_id": fee["id"],
+                    "fee_key": fee["fee_key"],
+                    "fee_name": fee["fee_name"],
+                    "amount": amount,
+                    "currency": fee["currency"] or "EUR",
+                    "quantity": qty,
+                    "total_amount": total,
+                }
+            )
+
+        airport_fee_ids = request.form.getlist("airport_fee_id")
+        for fid_raw in airport_fee_ids:
+            try:
+                fid = int(fid_raw)
+            except ValueError:
+                continue
+            qty = max(1, int(request.form.get(f"airport_qty_{fid}") or "1"))
+            cur.execute(
+                """
+                SELECT id, fee_key, fee_name, amount, currency
+                FROM airport_service_fees
+                WHERE id = ?
+                """,
+                (fid,),
+            )
+            fee = cur.fetchone()
+            if not fee:
+                continue
+            amount = float(fee["amount"] or 0)
+            total = round(amount * qty, 4)
+            items.append(
+                {
+                    "fee_source": "airport",
+                    "fee_id": fee["id"],
+                    "fee_key": fee["fee_key"],
+                    "fee_name": fee["fee_name"],
+                    "amount": amount,
+                    "currency": fee["currency"] or "EUR",
+                    "quantity": qty,
+                    "total_amount": total,
+                }
+            )
+
+        if ticket_qty > 0 and ticket_amount > 0:
+            ticket_total = round(ticket_amount * ticket_qty, 4)
+            items.append(
+                {
+                    "fee_source": "ticket",
+                    "fee_id": 0,
+                    "fee_key": "TICKET",
+                    "fee_name": "Ticket",
+                    "amount": ticket_amount,
+                    "currency": "EUR",
+                    "quantity": ticket_qty,
+                    "total_amount": ticket_total,
+                }
+            )
+
+        if not items:
+            flash("Select at least one fee.")
+            return redirect(url_for("sale_new"))
+
+        grand_total = round(sum(i["total_amount"] for i in items), 4)
+
+        def _split_payment(total: float) -> tuple[float, float]:
+            if payment_method == "CARD":
+                return 0.0, total
+            return total, 0.0
+
+        cash_amount, card_amount = _split_payment(grand_total)
+
+        cur.execute(
+            """
+            INSERT INTO sales (
+                sale_group_id, airline_id, sold_at_utc, created_by,
+                payment_method, cash_amount, card_amount, grand_total,
+                fee_source, fee_id, fee_name, amount, currency, quantity, total_amount
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sale_group_id,
+                airline_id,
+                now,
+                session.get("user_id"),
+                payment_method,
+                cash_amount,
+                card_amount,
+                grand_total,
+                "multi",
+                0,
+                "MULTI",
+                grand_total,
+                "EUR",
+                1,
+                grand_total,
+            ),
+        )
+        sale_id = cur.lastrowid
+        for item in items:
+            cur.execute(
+                """
+                INSERT INTO sale_items (
+                    sale_id, fee_source, fee_id, fee_key, fee_name,
+                    amount, currency, quantity, total_amount, created_at_utc
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sale_id,
+                    item["fee_source"],
+                    item["fee_id"],
+                    item["fee_key"],
+                    item["fee_name"],
+                    item["amount"],
+                    item["currency"],
+                    item["quantity"],
+                    item["total_amount"],
+                    now,
+                ),
+            )
+        conn.commit()
+
+    flash("Sale saved.")
+    return redirect(url_for("sale_new"))
+
+
+@app.get("/sales_list", endpoint="sales_list")
+@admin_required
+def sales_list():
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                s.id,
+                s.sale_group_id,
+                a.name AS airline_name,
+                a.code AS airline_code,
+                s.sold_at_utc,
+                s.grand_total AS total_amount,
+                s.cash_amount,
+                s.card_amount,
+                s.payment_method,
+                u.fullname AS sold_by_name,
+                u.nickname AS sold_by_nick,
+                (
+                    SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id
+                ) AS items_count,
+                (
+                    SELECT GROUP_CONCAT(
+                        CASE
+                            WHEN si.fee_source = 'airline' THEN
+                                CASE
+                                    WHEN COALESCE(af.fee_key, si.fee_key, '') != ''
+                                        THEN COALESCE(af.fee_key, si.fee_key) || ' - ' || COALESCE(af.fee_name, si.fee_name, si.fee_key)
+                                    ELSE COALESCE(af.fee_name, si.fee_name, si.fee_key)
+                                END
+                            WHEN si.fee_source = 'airport' THEN
+                                CASE
+                                    WHEN COALESCE(apf.fee_key, si.fee_key, '') != ''
+                                        THEN COALESCE(apf.fee_key, si.fee_key) || ' - ' || COALESCE(apf.fee_name, si.fee_name, si.fee_key)
+                                    ELSE COALESCE(apf.fee_name, si.fee_name, si.fee_key)
+                                END
+                            ELSE
+                                CASE
+                                    WHEN COALESCE(si.fee_key, '') != ''
+                                        THEN COALESCE(si.fee_key, '') || ' - ' || COALESCE(si.fee_name, si.fee_key)
+                                    ELSE COALESCE(si.fee_name, '')
+                                END
+                        END,
+                        char(10)
+                    )
+                    FROM sale_items si
+                    LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
+                    LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
+                    WHERE si.sale_id = s.id
+                ) AS items_label
+            FROM sales s
+            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN users u ON u.id = s.created_by
+            ORDER BY s.id DESC
+            """
+        )
+        rows = cur.fetchall()
+    return render_template("sales_list.html", sales=rows)
+
+
+@app.route("/sales/<int:sale_id>/edit", methods=["GET", "POST"], endpoint="sale_edit")
+@admin_required
+def sale_edit(sale_id: int):
+    if request.method == "GET":
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM sales WHERE id = ?", (sale_id,))
+            sale = cur.fetchone()
+            cur.execute(
+                """
+                SELECT fee_source, fee_id, quantity, amount
+                FROM sale_items
+                WHERE sale_id = ?
+                """,
+                (sale_id,),
+            )
+            items = cur.fetchall()
+        if not sale:
+            flash("Sale not found.")
+            return redirect(url_for("sales_list"))
+
+        airlines, airline_fees_map, airport_fees_list = _load_sale_fee_data()
+        return render_template(
+            "sale_edit.html",
+            sale=sale,
+            items=items,
+            airlines=airlines,
+            airline_fees_map=airline_fees_map,
+            airport_fees=airport_fees_list,
+        )
+
+    require_csrf()
+    airline_id_raw = request.form.get("airline_id") or ""
+    ticket_qty_raw = request.form.get("ticket_qty") or "0"
+    ticket_amount = _parse_amount(request.form.get("ticket_amount"))
+    sale_group_id = _sanitize(request.form.get("sale_group_id")) or None
+    payment_method = _sanitize(request.form.get("payment_method")).upper() or "CASH"
+
+    try:
+        airline_id = int(airline_id_raw)
+        ticket_qty = max(0, int(ticket_qty_raw))
+    except ValueError:
+        flash("Invalid input.")
+        return redirect(url_for("sale_edit", sale_id=sale_id))
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM airlines WHERE id = ?", (airline_id,))
+        if not cur.fetchone():
+            flash("Airline not found.")
+            return redirect(url_for("sale_edit", sale_id=sale_id))
+
+        if payment_method not in {"CASH", "CARD"}:
+            flash("Invalid payment method.")
+            return redirect(url_for("sale_edit", sale_id=sale_id))
+
+        items = []
+        airline_fee_ids = request.form.getlist("airline_fee_id")
+        for fid_raw in airline_fee_ids:
+            try:
+                fid = int(fid_raw)
+            except ValueError:
+                continue
+            qty = max(1, int(request.form.get(f"airline_qty_{fid}") or "1"))
+            cur.execute(
+                """
+                SELECT id, fee_key, fee_name, amount, currency
+                FROM airline_fees
+                WHERE id = ? AND airline_id = ?
+                """,
+                (fid, airline_id),
+            )
+            fee = cur.fetchone()
+            if not fee:
+                continue
+            amount = float(fee["amount"] or 0)
+            total = round(amount * qty, 4)
+            items.append(
+                {
+                    "fee_source": "airline",
+                    "fee_id": fee["id"],
+                    "fee_key": fee["fee_key"],
+                    "fee_name": fee["fee_name"],
+                    "amount": amount,
+                    "currency": fee["currency"] or "EUR",
+                    "quantity": qty,
+                    "total_amount": total,
+                }
+            )
+
+        airport_fee_ids = request.form.getlist("airport_fee_id")
+        for fid_raw in airport_fee_ids:
+            try:
+                fid = int(fid_raw)
+            except ValueError:
+                continue
+            qty = max(1, int(request.form.get(f"airport_qty_{fid}") or "1"))
+            cur.execute(
+                """
+                SELECT id, fee_key, fee_name, amount, currency
+                FROM airport_service_fees
+                WHERE id = ?
+                """,
+                (fid,),
+            )
+            fee = cur.fetchone()
+            if not fee:
+                continue
+            amount = float(fee["amount"] or 0)
+            total = round(amount * qty, 4)
+            items.append(
+                {
+                    "fee_source": "airport",
+                    "fee_id": fee["id"],
+                    "fee_key": fee["fee_key"],
+                    "fee_name": fee["fee_name"],
+                    "amount": amount,
+                    "currency": fee["currency"] or "EUR",
+                    "quantity": qty,
+                    "total_amount": total,
+                }
+            )
+
+        if ticket_qty > 0 and ticket_amount > 0:
+            ticket_total = round(ticket_amount * ticket_qty, 4)
+            items.append(
+                {
+                    "fee_source": "ticket",
+                    "fee_id": 0,
+                    "fee_key": "TICKET",
+                    "fee_name": "Ticket",
+                    "amount": ticket_amount,
+                    "currency": "EUR",
+                    "quantity": ticket_qty,
+                    "total_amount": ticket_total,
+                }
+            )
+
+        if not items:
+            flash("Select at least one fee.")
+            return redirect(url_for("sale_edit", sale_id=sale_id))
+
+        grand_total = round(sum(i["total_amount"] for i in items), 4)
+        now = _utc_now_iso()
+        if payment_method == "CARD":
+            cash_amount, card_amount = 0.0, grand_total
+        else:
+            cash_amount, card_amount = grand_total, 0.0
+
+        cur.execute(
+            """
+            UPDATE sales
+            SET sale_group_id = ?, airline_id = ?, sold_at_utc = ?, payment_method = ?,
+                cash_amount = ?, card_amount = ?, grand_total = ?,
+                fee_source = ?, fee_id = ?, fee_name = ?, amount = ?, currency = ?, quantity = ?, total_amount = ?
+            WHERE id = ?
+            """,
+            (
+                sale_group_id,
+                airline_id,
+                now,
+                payment_method,
+                cash_amount,
+                card_amount,
+                grand_total,
+                "multi",
+                0,
+                "MULTI",
+                grand_total,
+                "EUR",
+                1,
+                grand_total,
+                sale_id,
+            ),
+        )
+        cur.execute("DELETE FROM sale_items WHERE sale_id = ?", (sale_id,))
+        for item in items:
+            cur.execute(
+                """
+                INSERT INTO sale_items (
+                    sale_id, fee_source, fee_id, fee_key, fee_name,
+                    amount, currency, quantity, total_amount, created_at_utc
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sale_id,
+                    item["fee_source"],
+                    item["fee_id"],
+                    item["fee_key"],
+                    item["fee_name"],
+                    item["amount"],
+                    item["currency"],
+                    item["quantity"],
+                    item["total_amount"],
+                    now,
+                ),
+            )
+        conn.commit()
+
+    flash("Sale updated.")
+    return redirect(url_for("sales_list"))
+
+
+@app.post("/sales/<int:sale_id>/delete", endpoint="sales_delete")
+@admin_required
+def sales_delete(sale_id: int):
+    require_csrf()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM sales WHERE id = ?", (sale_id,))
+        conn.commit()
+    flash("Sale deleted.")
+    return redirect(url_for("sales_list"))
+
+
+
 @app.get("/reports", endpoint="reports")
 @admin_required
 def reports():
     return render_template("reports.html")
+
+
+@app.get("/reports/daily", endpoint="reports_daily")
+@admin_required
+def reports_daily():
+    date_str = _sanitize(request.args.get("date")) or _today_utc_date()
+    data = _build_report_payload(date_str, is_month=False)
+    return render_template("report_daily.html", date_str=date_str, **data)
+
+
+@app.get("/reports/monthly", endpoint="reports_monthly")
+@admin_required
+def reports_monthly():
+    month_str = _sanitize(request.args.get("month")) or _month_utc()
+    data = _build_report_payload(month_str, is_month=True)
+    return render_template("report_monthly.html", month_str=month_str, **data)
+
+
+@app.get("/reports/custom", endpoint="reports_custom")
+@admin_required
+def reports_custom():
+    date_from = _sanitize(request.args.get("date_from")) or _today_utc_date()
+    date_to = _sanitize(request.args.get("date_to")) or date_from
+    airlines, airline_items, airport_items, sellers = _load_custom_report_filters()
+    _, airline_fees_map, _ = _load_sale_fee_data()
+    airlines_json = [dict(a) for a in airlines]
+    airport_items_json = [dict(a) for a in airport_items]
+
+    selected_airlines = request.args.getlist("airline_id")
+    selected_items = request.args.getlist("item_id")
+    selected_payments = request.args.getlist("payment_method")
+    selected_sellers = request.args.getlist("sold_by")
+    selected_sources = request.args.getlist("source")
+
+    airline_item_ids = []
+    airport_item_ids = []
+    include_ticket = False
+    for v in selected_items:
+        if v == "ticket":
+            include_ticket = True
+        elif v.startswith("airline:"):
+            try:
+                airline_item_ids.append(int(v.split(":", 1)[1]))
+            except ValueError:
+                continue
+        elif v.startswith("airport:"):
+            try:
+                airport_item_ids.append(int(v.split(":", 1)[1]))
+            except ValueError:
+                continue
+
+    filters = {
+        "date_from": date_from,
+        "date_to": date_to,
+        "airline_ids": [int(x) for x in selected_airlines if x.isdigit()],
+        "payment_methods": [x for x in selected_payments if x in {"CASH", "CARD"}],
+        "sold_by_ids": [int(x) for x in selected_sellers if x.isdigit()],
+        "airline_item_ids": airline_item_ids,
+        "airport_item_ids": airport_item_ids,
+        "include_ticket": include_ticket,
+        "include_airport": "airport" in request.args.getlist("source") or bool(airport_item_ids),
+    }
+
+    rows, chart_data = _build_custom_report(filters)
+    palette = [
+        "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6",
+        "#14b8a6", "#f97316", "#22c55e", "#eab308", "#06b6d4",
+    ]
+    for idx, s in enumerate(chart_data.get("series", [])):
+        s["color"] = palette[idx % len(palette)]
+
+    chart_title_parts = []
+    if selected_airlines:
+        names = []
+        for a in airlines:
+            if str(a["id"]) in selected_airlines:
+                names.append(a["name"])
+        if names:
+            chart_title_parts.append(" + ".join(names))
+    if "airport" in request.args.getlist("source"):
+        chart_title_parts.append("Airport Service Fees")
+    chart_title = " + ".join(chart_title_parts) if chart_title_parts else "Custom Report Chart"
+
+    return render_template(
+        "report_custom.html",
+        date_from=date_from,
+        date_to=date_to,
+        airlines=airlines,
+        airline_items=airline_items,
+        airport_items=airport_items,
+        airport_fees=airport_items_json,
+        airlines_json=airlines_json,
+        sellers=sellers,
+        airline_fees_map=airline_fees_map,
+        selected_sources=request.args.getlist("source"),
+        selected_airlines=selected_airlines,
+        selected_items=selected_items,
+        selected_payments=selected_payments,
+        selected_sellers=selected_sellers,
+        rows=rows,
+        chart_data=chart_data,
+        chart_title=chart_title,
+    )
+
+
+def _report_to_csv(rows):
+    output = BytesIO()
+    writer = csv.writer(output)
+    for r in rows:
+        writer.writerow(r)
+    return output.getvalue()
+
+
+def _report_to_pdf(title: str, rows):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=36,
+        rightMargin=36,
+        topMargin=36,
+        bottomMargin=36,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        fontSize=16,
+        leading=20,
+        spaceAfter=12,
+        textColor=colors.black,
+    )
+    section_style = ParagraphStyle(
+        "SectionTitle",
+        parent=styles["Heading2"],
+        fontSize=12,
+        leading=14,
+        spaceBefore=6,
+        spaceAfter=6,
+        textColor=colors.black,
+    )
+    normal_style = ParagraphStyle(
+        "NormalCell", parent=styles["BodyText"], fontSize=9, leading=11, textColor=colors.black
+    )
+
+    def make_section_header(text):
+        header = Table([[Paragraph(text, section_style)]], colWidths=[doc.width])
+        header.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f1f5f9")),
+                    ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        return header
+
+    def wrap_table_data(data):
+        wrapped = []
+        for row in data:
+            wrapped.append([Paragraph(str(cell), normal_style) for cell in row])
+        return wrapped
+
+    def make_table(data, col_widths, header=True, total_row=False):
+        t = Table(wrap_table_data(data), colWidths=col_widths)
+        style = TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.black),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+        if header:
+            style.add("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e2e8f0"))
+            style.add("TEXTCOLOR", (0, 0), (-1, 0), colors.black)
+            style.add("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold")
+        if total_row:
+            style.add("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc"))
+            style.add("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold")
+            style.add("FONTSIZE", (0, 1), (-1, 1), 12)
+        t.setStyle(style)
+        return t
+
+    elements = [Paragraph(title, title_style)]
+
+    # parse rows to sections + tables
+    sections = []
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        if not row:
+            i += 1
+            continue
+        if len(row) == 1 and isinstance(row[0], str):
+            heading = row[0]
+            table_rows = []
+            i += 1
+            while i < len(rows):
+                r2 = rows[i]
+                if not r2:
+                    break
+                if len(r2) == 1 and isinstance(r2[0], str):
+                    break
+                table_rows.append(r2)
+                i += 1
+            sections.append((heading, table_rows))
+            continue
+        i += 1
+
+    page_width = doc.width
+    for heading, table_rows in sections:
+        elements.append(make_section_header(heading))
+        if not table_rows:
+            elements.append(Spacer(1, 6))
+            continue
+
+        header = table_rows[0]
+        data_rows = table_rows[1:]
+        if header == ["Airline", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"]:
+            col_widths = [
+                page_width * 0.18,
+                page_width * 0.14,
+                page_width * 0.26,
+                page_width * 0.08,
+                page_width * 0.12,
+                page_width * 0.11,
+                page_width * 0.11,
+            ]
+            elements.append(make_table([header] + data_rows, col_widths, header=True))
+        elif header == ["Airline", "Total", "Cash", "Card"]:
+            col_widths = [
+                page_width * 0.46,
+                page_width * 0.18,
+                page_width * 0.18,
+                page_width * 0.18,
+            ]
+            elements.append(make_table([header] + data_rows, col_widths, header=True))
+        elif header == ["Total", "Cash", "Card"] and len(data_rows) == 1:
+            totals_table = [header] + data_rows
+            col_widths = [page_width * 0.34, page_width * 0.33, page_width * 0.33]
+            elements.append(make_table(totals_table, col_widths, header=True, total_row=True))
+        else:
+            col_count = max(len(r) for r in table_rows)
+            col_widths = [page_width / col_count] * col_count
+            elements.append(make_table(table_rows, col_widths, header=True))
+
+        elements.append(Spacer(1, 10))
+
+    doc.build(elements)
+    return buffer.getvalue()
+
+
+def _export_report(date_filter: str, is_month: bool, fmt: str):
+    data = _build_report_payload(date_filter, is_month)
+    rows = []
+    label = "Monthly" if is_month else "Daily"
+    rows.append([f"{label} Report", date_filter])
+    rows.append([])
+    rows.append(["Airline Fees"])
+    rows.append(["Airline", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"])
+    for r in data["airline_items"]:
+        airline = f"{r['name']}{' (' + r['code'] + ')' if r['code'] else ''}"
+        rows.append([airline, r["fee_key"], r["fee_name"], r["qty"], r["total"], r["cash_total"], r["card_total"]])
+    rows.append([])
+    rows.append(["Airline Fees Totals by Airline"])
+    rows.append(["Airline", "Total", "Cash", "Card"])
+    for r in data["airline_totals"]:
+        airline = f"{r['name']}{' (' + r['code'] + ')' if r['code'] else ''}"
+        rows.append([airline, r["total"], r["cash_total"], r["card_total"]])
+    rows.append(["Airline Fees Total (All)"])
+    rows.append(["Total", "Cash", "Card"])
+    rows.append([data["airline_all"]["total"], data["airline_all"]["cash_total"], data["airline_all"]["card_total"]])
+    rows.append([])
+    rows.append(["Airport Service Fees"])
+    rows.append(["Airline", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"])
+    for r in data["airport_items"]:
+        airline = f"{r['name']}{' (' + r['code'] + ')' if r['code'] else ''}"
+        rows.append([airline, r["fee_key"], r["fee_name"], r["qty"], r["total"], r["cash_total"], r["card_total"]])
+    rows.append([])
+    rows.append(["Airport Fees Totals by Airline"])
+    rows.append(["Airline", "Total", "Cash", "Card"])
+    for r in data["airport_totals"]:
+        airline = f"{r['name']}{' (' + r['code'] + ')' if r['code'] else ''}"
+        rows.append([airline, r["total"], r["cash_total"], r["card_total"]])
+    rows.append(["Airport Fees Total (All)"])
+    rows.append(["Total", "Cash", "Card"])
+    rows.append([data["airport_all"]["total"], data["airport_all"]["cash_total"], data["airport_all"]["card_total"]])
+    rows.append([])
+    rows.append(["All Fees Total"])
+    rows.append(["Total", "Cash", "Card"])
+    rows.append([data["combined_all"]["total"], data["combined_all"]["cash_total"], data["combined_all"]["card_total"]])
+
+    if fmt == "csv":
+        content = _report_to_csv(rows)
+        resp = make_response(content)
+        resp.headers["Content-Type"] = "text/csv"
+        resp.headers["Content-Disposition"] = f"attachment; filename={label.lower()}_report_{date_filter}.csv"
+        return resp
+    if fmt == "pdf":
+        content = _report_to_pdf(f"{label} Report {date_filter}", rows)
+        resp = make_response(content)
+        resp.headers["Content-Type"] = "application/pdf"
+        if is_month:
+            filename = f"[MONTHLY REPORT] {date_filter}.pdf"
+        else:
+            filename = f"[DAILY REPORT] {date_filter}.pdf"
+        resp.headers["Content-Disposition"] = f"attachment; filename={filename}"
+        return resp
+    abort(400)
+
+
+@app.get("/reports/daily/export", endpoint="reports_daily_export")
+@admin_required
+def reports_daily_export():
+    date_str = _sanitize(request.args.get("date")) or _today_utc_date()
+    fmt = _sanitize(request.args.get("format")) or "csv"
+    return _export_report(date_str, is_month=False, fmt=fmt.lower())
+
+
+@app.get("/reports/monthly/export", endpoint="reports_monthly_export")
+@admin_required
+def reports_monthly_export():
+    month_str = _sanitize(request.args.get("month")) or _month_utc()
+    fmt = _sanitize(request.args.get("format")) or "csv"
+    return _export_report(month_str, is_month=True, fmt=fmt.lower())
+
+
+@app.get("/reports/custom/export", endpoint="reports_custom_export")
+@admin_required
+def reports_custom_export():
+    date_from = _sanitize(request.args.get("date_from")) or _today_utc_date()
+    date_to = _sanitize(request.args.get("date_to")) or date_from
+    selected_airlines = request.args.getlist("airline_id")
+    selected_items = request.args.getlist("item_id")
+    selected_payments = request.args.getlist("payment_method")
+    selected_sellers = request.args.getlist("sold_by")
+    fmt = _sanitize(request.args.get("format")) or "csv"
+
+    airline_item_ids = []
+    airport_item_ids = []
+    include_ticket = False
+    for v in selected_items:
+        if v == "ticket":
+            include_ticket = True
+        elif v.startswith("airline:"):
+            try:
+                airline_item_ids.append(int(v.split(":", 1)[1]))
+            except ValueError:
+                continue
+        elif v.startswith("airport:"):
+            try:
+                airport_item_ids.append(int(v.split(":", 1)[1]))
+            except ValueError:
+                continue
+
+    filters = {
+        "date_from": date_from,
+        "date_to": date_to,
+        "airline_ids": [int(x) for x in selected_airlines if x.isdigit()],
+        "payment_methods": [x for x in selected_payments if x in {"CASH", "CARD"}],
+        "sold_by_ids": [int(x) for x in selected_sellers if x.isdigit()],
+        "airline_item_ids": airline_item_ids,
+        "airport_item_ids": airport_item_ids,
+        "include_ticket": include_ticket,
+        "include_airport": "airport" in selected_sources or bool(airport_item_ids),
+    }
+    rows, chart_data = _build_custom_report(filters)
+
+    if fmt.lower() == "csv":
+        out = [["No.", "Airline", "Item Key", "Item Name", "Qty", "Total", "Payment", "Sold By", "Sold At"]]
+        for idx, r in enumerate(rows, start=1):
+            airline = f"{r['airline_name']}{' (' + r['airline_code'] + ')' if r['airline_code'] else ''}"
+            sold_by = r["sold_by_name"] or r["sold_by_nick"] or "-"
+            sold_at = (r["sold_at_utc"] or "")[:19].replace("T", " ")
+            out.append(
+                [
+                    idx,
+                    airline,
+                    r["fee_key"] or "",
+                    r["fee_name"] or "",
+                    r["quantity"],
+                    r["total_amount"],
+                    r["payment_method"],
+                    sold_by,
+                    sold_at,
+                ]
+            )
+        content = _report_to_csv(out)
+        resp = make_response(content)
+        resp.headers["Content-Type"] = "text/csv"
+        resp.headers["Content-Disposition"] = f"attachment; filename=[CUSTOM REPORT] {date_from}_to_{date_to}.csv"
+        return resp
+
+    if fmt.lower() == "pdf":
+        title = f"Custom Report {date_from} to {date_to}"
+        content = _custom_report_to_pdf(title, rows, chart_data)
+        resp = make_response(content)
+        resp.headers["Content-Type"] = "application/pdf"
+        resp.headers["Content-Disposition"] = f"attachment; filename=[CUSTOM REPORT] {date_from}_to_{date_to}.pdf"
+        return resp
+
+    abort(400)
 
 
 @app.get("/variable_rewards", endpoint="variable_rewards")
@@ -663,6 +2108,82 @@ def delete_user(user_id: int):
     return redirect(url_for("users"))
 
 
+@app.post("/users/<int:user_id>/reset_password", endpoint="reset_user_password")
+@admin_required
+def reset_user_password(user_id: int):
+    require_csrf()
+
+    if session.get("user_id") == user_id:
+        flash("You cannot reset the currently logged-in user.")
+        return redirect(url_for("users"))
+
+    temp_password = _generate_temp_password()
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            flash("User not found.")
+            return redirect(url_for("users"))
+
+        cur.execute(
+            "UPDATE users SET password = ?, must_change_password = 1 WHERE id = ?",
+            (hash_password(temp_password), user_id),
+        )
+        conn.commit()
+
+    flash(f"Temporary password: {temp_password} (user must change it on next login)")
+    return redirect(url_for("users"))
+
+
+@app.route(
+    "/users/<int:user_id>/reset_questions",
+    methods=["GET", "POST"],
+    endpoint="reset_user_questions",
+)
+@admin_required
+def reset_user_questions(user_id: int):
+    if request.method == "GET":
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id, fullname, nickname FROM users WHERE id = ?", (user_id,))
+            user = cur.fetchone()
+        if not user:
+            flash("User not found.")
+            return redirect(url_for("users"))
+        return render_template("reset_questions.html", user=user)
+
+    require_csrf()
+    q1 = _sanitize(request.form.get("q1"))
+    a1 = _sanitize(request.form.get("a1"))
+    q2 = _sanitize(request.form.get("q2"))
+    a2 = _sanitize(request.form.get("a2"))
+    q3 = _sanitize(request.form.get("q3"))
+    a3 = _sanitize(request.form.get("a3"))
+
+    if not (q1 and a1 and q2 and a2 and q3 and a3):
+        flash("All questions and answers are required.")
+        return redirect(url_for("reset_user_questions", user_id=user_id))
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            flash("User not found.")
+            return redirect(url_for("users"))
+
+        cur.execute(
+            "UPDATE users SET q1 = ?, a1 = ?, q2 = ?, a2 = ?, q3 = ?, a3 = ? WHERE id = ?",
+            (q1, a1, q2, a2, q3, a3, user_id),
+        )
+        conn.commit()
+
+    flash("Security questions updated.")
+    return redirect(url_for("users"))
+
+
 @app.get("/users/<int:user_id>/logs", endpoint="user_logs")
 @admin_required
 def user_logs(user_id: int):
@@ -807,6 +2328,131 @@ def airline_detail(airline_id: int):
         return redirect(url_for("airlines"))
     return render_template("airline_detail.html", airline=airline)
 
+
+@app.get("/airport_service_fees", endpoint="airport_service_fees")
+@admin_required
+def airport_service_fees():
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, fee_key, fee_name, amount, currency, unit, notes, updated_at_utc
+            FROM airport_service_fees
+            ORDER BY fee_key COLLATE NOCASE ASC
+            """
+        )
+        fees = cur.fetchall()
+    return render_template("airport_service_fees.html", fees=fees)
+
+
+@app.post("/airport_service_fees/add", endpoint="airport_service_fees_add")
+@admin_required
+def airport_service_fees_add():
+    require_csrf()
+    fee_key = _sanitize(request.form.get("fee_key"))
+    fee_name = _sanitize(request.form.get("fee_name"))
+    amount = _parse_amount(request.form.get("amount"))
+    currency = _sanitize(request.form.get("currency")) or "EUR"
+    unit = _sanitize(request.form.get("unit"))
+    notes = _sanitize(request.form.get("notes"))
+    now = _utc_now_iso()
+
+    if not fee_key or not fee_name:
+        flash("Fee key and name are required.")
+        return redirect(url_for("airport_service_fees"))
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM airport_service_fees WHERE fee_key = ?", (fee_key,))
+        if cur.fetchone():
+            flash("Fee key must be unique.")
+            return redirect(url_for("airport_service_fees"))
+
+        cur.execute(
+            """
+            INSERT INTO airport_service_fees
+                (fee_key, fee_name, amount, currency, unit, notes, updated_at_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (fee_key, fee_name, amount, currency, unit or None, notes or None, now),
+        )
+        conn.commit()
+
+    flash("Fee added.")
+    return redirect(url_for("airport_service_fees"))
+
+
+@app.route(
+    "/airport_service_fees/<int:fee_id>/edit",
+    methods=["GET", "POST"],
+    endpoint="airport_service_fee_edit",
+)
+@admin_required
+def airport_service_fee_edit(fee_id: int):
+    if request.method == "GET":
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, fee_key, fee_name, amount, currency, unit, notes
+                FROM airport_service_fees
+                WHERE id = ?
+                """,
+                (fee_id,),
+            )
+            fee = cur.fetchone()
+        if not fee:
+            flash("Fee not found.")
+            return redirect(url_for("airport_service_fees"))
+        return render_template("airport_service_fee_edit.html", fee=fee)
+
+    require_csrf()
+    fee_key = _sanitize(request.form.get("fee_key"))
+    fee_name = _sanitize(request.form.get("fee_name"))
+    amount = _parse_amount(request.form.get("amount"))
+    currency = _sanitize(request.form.get("currency")) or "EUR"
+    unit = _sanitize(request.form.get("unit"))
+    notes = _sanitize(request.form.get("notes"))
+    now = _utc_now_iso()
+
+    if not fee_key or not fee_name:
+        flash("Fee key and name are required.")
+        return redirect(url_for("airport_service_fee_edit", fee_id=fee_id))
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT 1 FROM airport_service_fees WHERE fee_key = ? AND id != ?",
+            (fee_key, fee_id),
+        )
+        if cur.fetchone():
+            flash("Fee key must be unique.")
+            return redirect(url_for("airport_service_fee_edit", fee_id=fee_id))
+
+        cur.execute(
+            """
+            UPDATE airport_service_fees
+            SET fee_key = ?, fee_name = ?, amount = ?, currency = ?, unit = ?, notes = ?, updated_at_utc = ?
+            WHERE id = ?
+            """,
+            (fee_key, fee_name, amount, currency, unit or None, notes or None, now, fee_id),
+        )
+        conn.commit()
+
+    flash("Fee updated.")
+    return redirect(url_for("airport_service_fees"))
+
+
+@app.post("/airport_service_fees/<int:fee_id>/delete", endpoint="airport_service_fee_delete")
+@admin_required
+def airport_service_fee_delete(fee_id: int):
+    require_csrf()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM airport_service_fees WHERE id = ?", (fee_id,))
+        conn.commit()
+    flash("Fee deleted.")
+    return redirect(url_for("airport_service_fees"))
 
 @app.route("/airlines/<int:airline_id>/edit", methods=["GET", "POST"], endpoint="airlines_edit")
 @admin_required
