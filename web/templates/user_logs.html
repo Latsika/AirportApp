@@ -56,7 +56,6 @@
   /* ✅ Tabuľka: horizontálny scroll namiesto lámania písmen */
   .table-wrap {
     width: 100%;
-    overflow-x: auto;
     border-radius: 14px;
     border: 1px solid #334155;
     background: #0b1220;
@@ -65,7 +64,7 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 1100px; /* dôležité: aby sa na mobile radšej scrollovalo */
+    table-layout: fixed;
   }
 
   th, td {
@@ -73,9 +72,12 @@
     border-bottom: 1px solid #334155;
     text-align: left;
     vertical-align: top;
+    white-space: normal;
+    word-wrap: break-word;
+    word-break: break-word;
   }
 
-  th { font-weight: 900; opacity: .95; }
+th { font-weight: 900; opacity: .95; }
   tr:last-child td { border-bottom: none; }
 
   .ok { font-weight: 900; }
@@ -84,7 +86,6 @@
   /* mobil: nech table ostane scrollovateľná a čitateľná */
   @media (max-width: 520px) {
     .container { padding: 14px !important; }
-    table { min-width: 980px; }
   }
 </style>
 {% endblock %}
@@ -97,7 +98,7 @@
     <div class="mini">Nickname: <span class="wrap">{{ user.nickname }}</span></div>
     <div class="mini">Role: {{ user.role }}</div>
   </div>
-  <p class="muted">Showing last 200 auth events for this user (login/logout/session timeout + failed attempts).</p>
+  <p class="muted">Showing last 200 auth events and sales changes for this user.</p>
 </div>
 
 {% if logs and logs|length > 0 %}
@@ -136,4 +137,39 @@
 {% else %}
 <p class="muted">No logs for this user yet.</p>
 {% endif %}
+
+{% if sales_logs and sales_logs|length > 0 %}
+  <div style="margin-top:18px;">
+    <h3>Sales Changes</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>When (UTC)</th>
+            <th>Action</th>
+            <th>Sale ID</th>
+            <th>User-Agent</th>
+            <th>IP</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in sales_logs %}
+          <tr>
+            <td class="wrap">{{ row.created_at_utc }}</td>
+            <td>{{ row.action }}</td>
+            <td>{{ row.sale_id }}</td>
+            <td class="wrap">{{ row.user_agent or "-" }}</td>
+            <td class="wrap">{{ row.ip or "-" }}</td>
+            <td class="wrap">{{ row.details or "-" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <p class="muted" style="margin-top:14px;">No sales changes for this user yet.</p>
+{% endif %}
 {% endblock %}
+

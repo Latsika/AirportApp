@@ -271,6 +271,31 @@ def _migrate_auth_logs_table(conn: sqlite3.Connection) -> None:
         _rebuild_auth_logs(conn)
 
 
+def _migrate_sales_logs_table(conn: sqlite3.Connection) -> None:
+    """Ensure sales_logs exists for auditing sale edits/deletes."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sales_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            sale_id INTEGER,
+            action TEXT NOT NULL,
+            details TEXT,
+            ip TEXT,
+            user_agent TEXT,
+            created_at_utc TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY(sale_id) REFERENCES sales(id) ON DELETE SET NULL
+        )
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_logs_created ON sales_logs(created_at_utc)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_logs_user ON sales_logs(user_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_logs_sale ON sales_logs(sale_id)")
+    conn.commit()
+
+
 def _migrate_airlines_table(conn: sqlite3.Connection) -> None:
     cols = _get_columns(conn, "airlines")
     cur = conn.cursor()
@@ -502,6 +527,55 @@ def _migrate_sale_items_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _update_ticket_labels(conn: sqlite3.Connection) -> None:
+    """Update ticket item labels to include airline prefix and Plane Ticket name."""
+    if not _table_exists(conn, "sale_items"):
+        return
+
+    cur = conn.cursor()
+    cur.execute("SELECT id, name, code FROM airlines")
+    airlines = {r["id"]: r for r in cur.fetchall()}
+
+    def _label(airline_id: int | None) -> str:
+        if not airline_id:
+            return "Plane Ticket"
+        a = airlines.get(airline_id)
+        if not a:
+            return "Plane Ticket"
+        name = a["name"]
+        code = a["code"]
+        if code:
+            return f"{name} ({code}) Plane Ticket"
+        return f"{name} Plane Ticket"
+
+    cur.execute(
+        """
+        SELECT si.id AS item_id, s.airline_id
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        WHERE si.fee_source = 'ticket'
+        """
+    )
+    rows = cur.fetchall()
+    for r in rows:
+        label = _label(r["airline_id"])
+        cur.execute(
+            "UPDATE sale_items SET fee_key = 'TICKET', fee_name = ? WHERE id = ?",
+            (label, r["item_id"]),
+        )
+
+    cur.execute("SELECT id, airline_id FROM sales WHERE fee_source = 'ticket'")
+    sales_rows = cur.fetchall()
+    for r in sales_rows:
+        label = _label(r["airline_id"])
+        cur.execute(
+            "UPDATE sales SET fee_key = 'TICKET', fee_name = ? WHERE id = ?",
+            (label, r["id"]),
+        )
+
+    conn.commit()
+
+
 def _backfill_sale_items(conn: sqlite3.Connection) -> None:
     """Backfill sale_items from legacy columns in sales for rows missing items."""
     cur = conn.cursor()
@@ -523,6 +597,20 @@ def _backfill_sale_items(conn: sqlite3.Connection) -> None:
         return
 
     now = _utc_now_iso()
+    cur.execute("SELECT id, name, code FROM airlines")
+    airlines = {r["id"]: r for r in cur.fetchall()}
+
+    def _airline_label(airline_id: int | None) -> str:
+        if not airline_id:
+            return "Plane Ticket"
+        a = airlines.get(airline_id)
+        if not a:
+            return "Plane Ticket"
+        name = a["name"]
+        code = a["code"]
+        if code:
+            return f"{name} ({code}) Plane Ticket"
+        return f"{name} Plane Ticket"
 
     def _insert_item(sale_id, source, fee_id, fee_key, fee_name, amount, currency, qty):
         total = (amount or 0) * (qty or 1)
@@ -581,7 +669,7 @@ def _backfill_sale_items(conn: sqlite3.Connection) -> None:
                     "ticket",
                     0,
                     "TICKET",
-                    "Ticket",
+                    _airline_label(r_dict.get("airline_id")),
                     r_dict.get("ticket_amount") if "ticket_amount" in cols else 0,
                     "EUR",
                     r_dict.get("ticket_qty"),
@@ -635,6 +723,7 @@ def init_db() -> None:
 
         # AUTH LOGS (must be repaired if FK references users_old)
         _migrate_auth_logs_table(conn)
+        _migrate_sales_logs_table(conn)
 
         # APP STATE
         cur.execute(
@@ -767,6 +856,7 @@ def init_db() -> None:
         conn.commit()
         _migrate_sale_items_table(conn)
         _backfill_sale_items(conn)
+        _update_ticket_labels(conn)
 
 
 def log_auth_event(
@@ -804,6 +894,40 @@ def log_auth_event(
                 ip,
                 user_agent,
                 details,
+                created_at_utc,
+            ),
+        )
+    conn.commit()
+
+
+def log_sales_event(
+    *,
+    user_id: int | None,
+    sale_id: int | None,
+    action: str,
+    details: str | None = None,
+    ip: str | None = None,
+    user_agent: str | None = None,
+) -> None:
+    """Write sales audit log."""
+    created_at_utc = _utc_now_iso()
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO sales_logs (
+                user_id, sale_id, action, details, ip, user_agent, created_at_utc
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                sale_id,
+                action,
+                details,
+                ip,
+                user_agent,
                 created_at_utc,
             ),
         )
