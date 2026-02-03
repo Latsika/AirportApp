@@ -4,11 +4,11 @@
 <style>
   :root { --container-max: 900px; }
   .row { display:grid; gap:10px; }
-  .card { padding:12px 14px; border-radius:14px; background:#0b1220; border:1px solid #334155; }
+  .card { padding:12px 14px; border-radius:14px; background:var(--bg-1); border:1px solid var(--border); }
   .kv { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   .muted { opacity:.85; font-size:12px; }
   .btn-row { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
-  .btn-small { width:auto; margin:0; padding:10px 14px; border-radius:999px; border:1px solid #334155; background:#111827; color:#e2e8f0; font-weight:900; text-decoration:none; cursor:pointer; }
+  .btn-small { width:auto; margin:0; padding:10px 14px; border-radius:999px; border:1px solid var(--border); background:var(--bg-2); color:#e2e8f0; font-weight:900; text-decoration:none; cursor:pointer; }
   .danger { border-color:#7f1d1d; background:#2a0f12; }
 </style>
 {% endblock %}

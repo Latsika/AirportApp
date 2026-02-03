@@ -59,4 +59,12 @@
     </div>
   </form>
 </div>
+
+<div style="max-width:900px; margin-top:16px;">
+  <h3 style="margin:0 0 8px;">Database</h3>
+  <div class="muted" style="margin-bottom:8px;">Export a backup copy of the main database.</div>
+  <form method="get" action="{{ url_for('account_settings_db_export') }}">
+    <button type="submit" style="width:auto; margin:0;">Export database</button>
+  </form>
+</div>
 {% endblock %}

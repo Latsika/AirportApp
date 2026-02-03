@@ -16,7 +16,7 @@
 <h2>Variable rewards of users</h2>
 
 <div style="margin-top:12px; display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));">
-  <div style="padding:14px 16px; border-radius:14px; background:#0b1220; border:1px solid #334155;">
+  <div style="padding:14px 16px; border-radius:14px; background:var(--bg-1); border:1px solid var(--border);">
     <div class="muted" style="font-weight:900; margin-bottom:6px;">Total monthly Airport fees</div>
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
       <label class="muted" style="margin:0;">Month</label>
@@ -47,7 +47,7 @@
     </div>
   </div>
 
-  <div style="padding:14px 16px; border-radius:14px; background:#0b1220; border:1px solid #334155;">
+  <div style="padding:14px 16px; border-radius:14px; background:var(--bg-1); border:1px solid var(--border);">
     <div class="muted" style="font-weight:900; margin-bottom:6px;">Percent to distribute</div>
     <form method="post" action="{{ url_for('variable_rewards_percent') }}" style="margin:0;">
       <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
@@ -61,7 +61,7 @@
     <div class="muted" style="margin-top:6px;">Set percent of total to distribute.</div>
   </div>
 
-  <div style="padding:14px 16px; border-radius:14px; background:#0b1220; border:1px solid #334155;">
+  <div style="padding:14px 16px; border-radius:14px; background:var(--bg-1); border:1px solid var(--border);">
     <div class="muted" style="font-weight:900; margin-bottom:6px;">Reduced amount of total Airport fees</div>
     <div id="reducedAmount" style="font-size:20px; font-weight:900;">0.00 EUR</div>
     <div class="muted" style="margin-top:6px;">Calculated from Total × %.</div>
@@ -89,33 +89,33 @@
     </form>
   </div>
   <div style="overflow-x:auto; margin-top:12px;">
-    <table style="width:100%; border-collapse:collapse; border-radius:14px; overflow:hidden; border:1px solid #334155; background:#0b1220;">
+    <table style="width:100%; border-collapse:collapse; border-radius:14px; overflow:hidden; border:1px solid var(--border); background:var(--bg-1);">
       <thead>
         <tr>
-          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">#</th>
-          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Full name</th>
-          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Print</th>
-          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Nickname</th>
-          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Role</th>
-          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">%</th>
-          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Total Amount</th>
-          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Active</th>
+          <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">#</th>
+          <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Full name</th>
+          <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Print</th>
+          <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Nickname</th>
+          <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Role</th>
+          <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">%</th>
+          <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Total Amount</th>
+          <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Active</th>
         </tr>
       </thead>
       <tbody>
       {% for u in users %}
         <tr data-user-id="{{ u.id }}">
-          <td style="padding:12px; border-bottom:1px solid #334155;">{{ loop.index }}</td>
-          <td style="padding:12px; border-bottom:1px solid #334155;">{{ u.fullname }}</td>
-          <td style="padding:12px; border-bottom:1px solid #334155;">
-            <a class="btn-small" href="{{ url_for('variable_rewards_print', user_id=u.id, month=selected_month, year=selected_year) }}">Print</a>
+          <td style="padding:12px; border-bottom:1px solid var(--border);">{{ loop.index }}</td>
+          <td style="padding:12px; border-bottom:1px solid var(--border);">{{ u.fullname }}</td>
+          <td style="padding:12px; border-bottom:1px solid var(--border);">
+            <a class="btn-small" style="font-size: 0.8em; padding: 8px 12px;" href="{{ url_for('variable_rewards_print', user_id=u.id, month=selected_month, year=selected_year) }}">Print</a>
           </td>
-          <td style="padding:12px; border-bottom:1px solid #334155;">{{ u.nickname }}</td>
-          <td style="padding:12px; border-bottom:1px solid #334155;">{{ u.role }}</td>
-          <td style="padding:12px; border-bottom:1px solid #334155;">
+          <td style="padding:12px; border-bottom:1px solid var(--border);">{{ u.nickname }}</td>
+          <td style="padding:12px; border-bottom:1px solid var(--border);">{{ u.role }}</td>
+          <td style="padding:12px; border-bottom:1px solid var(--border);">
             <span class="user-percent">0%</span>
           </td>
-          <td style="padding:12px; border-bottom:1px solid #334155;">
+          <td style="padding:12px; border-bottom:1px solid var(--border);">
             {% set manual_value = manual_amounts.get(u.id|string) %}
             <form method="post" action="{{ url_for('variable_rewards_manual', user_id=u.id) }}" style="margin:0;" class="manual-form">
               <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
@@ -130,7 +130,7 @@
               Total: <span class="user-total">0.00 EUR</span>
             </div>
           </td>
-          <td style="padding:12px; border-bottom:1px solid #334155;">
+          <td style="padding:12px; border-bottom:1px solid var(--border);">
             <form method="post" action="{{ url_for('variable_rewards_active', user_id=u.id) }}" style="margin:0;" data-user-id="{{ u.id }}">
               <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
               <label style="display:inline-flex; align-items:center; gap:8px;">

@@ -1,10 +1,16 @@
 import os
 import sqlite3
+import shutil
+import sys
 from datetime import datetime, timezone
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DB_NAME = os.path.abspath(os.path.join(BASE_DIR, "..", "airport_app.db"))
+if getattr(sys, "frozen", False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+DEFAULT_DB_NAME = os.path.abspath(os.path.join(BASE_DIR, "airport_app.db"))
 
 
 def get_db_path() -> str:
@@ -701,6 +707,8 @@ def _migrate_sales_table(conn: sqlite3.Connection) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_pnr ON sales(pnr)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_passenger ON sales(passenger_name)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_sold_at ON sales(sold_at_utc)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_created_by ON sales(created_by)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method)")
     conn.commit()
 
 
@@ -910,6 +918,7 @@ def _backfill_sale_items(conn: sqlite3.Connection) -> None:
 
 def init_db() -> None:
     """Initialize base schema and apply minimal migrations."""
+    _backup_db_on_startup()
     with get_connection() as conn:
         cur = conn.cursor()
 
@@ -941,6 +950,7 @@ def init_db() -> None:
         # AUTH LOGS (must be repaired if FK references users_old)
         _migrate_auth_logs_table(conn)
         _migrate_sales_logs_table(conn)
+        _cleanup_old_activity_logs(conn)
 
         # APP STATE
         cur.execute(
@@ -1187,6 +1197,17 @@ def init_db() -> None:
         _update_ticket_labels(conn)
 
 
+def _cleanup_old_activity_logs(conn: sqlite3.Connection) -> None:
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM auth_logs WHERE date(created_at_utc) < date('now','-60 day')")
+        cur.execute("DELETE FROM sales_logs WHERE date(created_at_utc) < date('now','-60 day')")
+        cur.execute("DELETE FROM notification_logs WHERE date(created_at_utc) < date('now','-60 day')")
+        conn.commit()
+    except sqlite3.Error:
+        pass
+
+
 def log_auth_event(
     *,
     user_id: int | None,
@@ -1226,6 +1247,37 @@ def log_auth_event(
             ),
         )
     conn.commit()
+
+
+def _backup_db_on_startup() -> None:
+    db_path = get_db_path()
+    if not os.path.exists(db_path):
+        return
+    base_dir = os.path.dirname(db_path)
+    backups_dir = os.path.join(base_dir, "backups")
+    os.makedirs(backups_dir, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
+    backup_name = f"airport_app_{ts}.db"
+    backup_path = os.path.join(backups_dir, backup_name)
+    try:
+        shutil.copy2(db_path, backup_path)
+    except OSError:
+        pass
+    try:
+        files = [
+            f for f in os.listdir(backups_dir)
+            if f.startswith("airport_app_") and f.endswith(".db")
+        ]
+        files.sort()
+        excess = len(files) - 30
+        if excess > 0:
+            for f in files[:excess]:
+                try:
+                    os.remove(os.path.join(backups_dir, f))
+                except OSError:
+                    pass
+    except OSError:
+        pass
 
 
 def log_sales_event(

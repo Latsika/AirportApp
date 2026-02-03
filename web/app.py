@@ -7,13 +7,15 @@ import sqlite3
 import sys
 import time
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from email.message import EmailMessage
 from io import BytesIO, StringIO
 from functools import wraps
 from secrets import token_urlsafe
-from typing import Optional
+from typing import Optional, cast, Any
 
 import smtplib
 import csv
@@ -27,6 +29,7 @@ from flask import (
     request,
     session,
     url_for,
+    send_file,
 )
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -37,6 +40,7 @@ from database.db import (  # noqa: E402
     delete_app_state,
     ensure_default_admin,
     get_app_state,
+    get_db_path,
     get_connection,
     init_db,
     log_auth_event,
@@ -47,17 +51,65 @@ from utils.security import hash_password, verify_password_and_upgrade  # noqa: E
 from reportlab.lib.pagesizes import letter, A4, landscape
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Flowable
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.graphics.shapes import Drawing
-from reportlab.graphics.charts.barcharts import VerticalBarChart
 from reportlab.graphics.charts.textlabels import Label
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=os.path.join(os.path.dirname(__file__), "templates"))
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-please-change")
 app.config["SESSION_PERMANENT"] = True
 app.permanent_session_lifetime = timedelta(minutes=30)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+if os.environ.get("AIRPORTAPP_HTTPS", "").strip() == "1":
+    app.config["SESSION_COOKIE_SECURE"] = True
+
+
+def _app_base_dir() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return PROJECT_ROOT
+
+
+def _configure_logging() -> None:
+    log_dir = os.path.join(_app_base_dir(), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "app.log")
+    try:
+        cutoff = time.time() - (30 * 24 * 60 * 60)
+        for name in os.listdir(log_dir):
+            if not name.startswith("app.log"):
+                continue
+            path = os.path.join(log_dir, name)
+            try:
+                if os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+            except OSError:
+                pass
+    except OSError:
+        pass
+    handler = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=5, encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    handler.setFormatter(formatter)
+    handler.setLevel(logging.INFO)
+    app.logger.setLevel(logging.INFO)
+    if not any(isinstance(h, RotatingFileHandler) for h in app.logger.handlers):
+        app.logger.addHandler(handler)
+
+
+_configure_logging()
+
+
+def _set_app_boot_id() -> str:
+    boot_id = token_urlsafe(16)
+    set_app_state("app_boot_id", boot_id)
+    app.logger.info("App restarted. Sessions will be invalidated.")
+    return boot_id
+
+
+APP_BOOT_ID = _set_app_boot_id()
 
 init_db()
 ensure_default_admin(hash_password)
@@ -719,7 +771,7 @@ def _custom_report_to_pdf(title: str, rows, chart_data, date_from: str, date_to:
         t.setStyle(style)
         return t
 
-    elements = [Paragraph(title, title_style)]
+    elements: list[Flowable] = [Paragraph(title, title_style)]
 
     # parse rows to sections + tables
     sections = []
@@ -852,7 +904,7 @@ def _custom_report_to_pdf(title: str, rows, chart_data, date_from: str, date_to:
         label.setText("Quantity by date (up to 6 series)")
         label.fontSize = 9
         drawing.add(label)
-        elements.append(drawing)
+        elements.append(cast(Flowable, drawing))
 
         legend_rows = [["Series", "Color"]]
         for idx, s in enumerate(series):
@@ -1579,6 +1631,26 @@ def enforce_session_timeout_and_single_user():
     if not session.get("logged_in"):
         return
 
+    current_boot = get_app_state("app_boot_id")
+    if session.get("boot_id") and current_boot and session.get("boot_id") != current_boot:
+        log_auth_event(
+            user_id=session.get("user_id"),
+            nickname=session.get("nickname"),
+            fullname=session.get("fullname"),
+            role=session.get("role"),
+            action="SESSION_REVOKED",
+            success=True,
+            ip=_client_ip(),
+            user_agent=_user_agent(),
+            details="Application restarted. Session invalidated.",
+        )
+        if session.get("sid") and session.get("sid") == get_app_state("active_session_id"):
+            delete_app_state("active_session_id")
+        session.clear()
+        if request.endpoint not in {"index", "login"}:
+            return redirect(url_for("index"))
+        return
+
     active_sid = get_app_state("active_session_id")
     current_sid = session.get("sid")
 
@@ -1712,6 +1784,7 @@ def login():
     session["role"] = row["role"]
     session["last_activity_ts"] = int(time.time())
     session["sid"] = sid
+    session["boot_id"] = get_app_state("app_boot_id")
 
     set_app_state("active_session_id", sid)
 
@@ -2992,7 +3065,7 @@ def _report_to_pdf(title: str, rows):
 
 
 def _export_report(date_filter: str, is_month: bool, fmt: str):
-    data = _build_report_payload(date_filter, is_month)
+    data = cast(dict[str, Any], _build_report_payload(date_filter, is_month))
     rows = []
     label = "Monthly" if is_month else "Daily"
     report_type = "monthly" if is_month else "daily"
@@ -3379,6 +3452,16 @@ def account_settings_smtp():
 
     flash("SMTP settings saved.")
     return redirect(url_for("account_settings"))
+
+
+@app.get("/account_settings/db_export", endpoint="account_settings_db_export")
+@admin_required
+def account_settings_db_export():
+    db_path = os.path.abspath(get_db_path())
+    if not os.path.exists(db_path):
+        flash("Database file not found.")
+        return redirect(url_for("account_settings"))
+    return send_file(db_path, as_attachment=True, download_name="airport_app.db")
 
 
 @app.route("/notifications", methods=["GET", "POST"], endpoint="notifications")
@@ -4822,4 +4905,5 @@ def airline_destination_delete(airline_id: int, destination_id: int):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    debug = os.environ.get("AIRPORTAPP_DEBUG", "").strip() == "1"
+    app.run(debug=debug)

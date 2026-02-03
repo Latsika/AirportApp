@@ -6,17 +6,17 @@
 
   .topline { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
   .muted { opacity:.85; font-size:12px; }
-  .card { padding:12px 14px; border-radius:14px; background:#0b1220; border:1px solid #334155; margin-top:12px; }
+  .card { padding:12px 14px; border-radius:14px; background:var(--bg-1); border:1px solid var(--border); margin-top:12px; }
 
   .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
   @media (max-width: 700px) { .grid2 { grid-template-columns:1fr; } }
 
-  table { width:100%; border-collapse:collapse; border-radius:14px; overflow:hidden; border:1px solid #334155; background:#0b1220; margin-top:12px; }
-  th, td { padding:12px; border-bottom:1px solid #334155; text-align:left; vertical-align:top; }
+  table { width:100%; border-collapse:collapse; border-radius:14px; overflow:hidden; border:1px solid var(--border); background:var(--bg-1); margin-top:12px; }
+  th, td { padding:12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
   th { font-weight:900; opacity:.95; }
   tr:last-child td { border-bottom:none; }
 
-  .btn-small { width:auto; margin:0; padding:8px 12px; border-radius:999px; border:1px solid #334155; background:#111827; color:#e2e8f0; font-weight:900; text-decoration:none; cursor:pointer; }
+  .btn-small { width:auto; margin:0; padding:8px 12px; border-radius:999px; border:1px solid var(--border); background:var(--bg-2); color:#e2e8f0; font-weight:900; text-decoration:none; cursor:pointer; }
   .danger { border-color:#7f1d1d; background:#2a0f12; }
 </style>
 {% endblock %}
