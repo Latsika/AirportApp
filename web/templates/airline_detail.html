@@ -38,6 +38,7 @@
 <div class="btn-row">
   <a class="btn-small" href="{{ url_for('airlines_edit', airline_id=airline.id) }}">EDIT</a>
   <a class="btn-small" href="{{ url_for('airline_fees', airline_id=airline.id) }}">FEES</a>
+  <a class="btn-small" href="{{ url_for('airline_destinations', airline_id=airline.id) }}">DESTINATIONS</a>
 
   <form method="post" action="{{ url_for('airlines_delete', airline_id=airline.id) }}" onsubmit="return confirm('Delete airline {{ airline.name }}?');" style="margin:0;">
     <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">

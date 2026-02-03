@@ -1,6 +1,262 @@
 {% extends "layout.html" %}
 
+{% block page_style %}
+<style>
+  :root { --container-max: 100vw; }
+  body { padding: 0; }
+  .app-shell { max-width: none; }
+  .container { width: 100vw; max-width: 100vw; border-radius: 0; }
+  @media (max-width: 700px) {
+    .container { padding: 20px; }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <h2>Variable rewards of users</h2>
-<p>Placeholder – implementujeme neskôr.</p>
+
+<div style="margin-top:12px; display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));">
+  <div style="padding:14px 16px; border-radius:14px; background:#0b1220; border:1px solid #334155;">
+    <div class="muted" style="font-weight:900; margin-bottom:6px;">Total monthly Airport fees</div>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+      <label class="muted" style="margin:0;">Month</label>
+      <select id="monthSelect" style="width:auto; margin:0;">
+        <option value="1" {% if selected_month == 1 %}selected{% endif %}>January</option>
+        <option value="2" {% if selected_month == 2 %}selected{% endif %}>February</option>
+        <option value="3" {% if selected_month == 3 %}selected{% endif %}>March</option>
+        <option value="4" {% if selected_month == 4 %}selected{% endif %}>April</option>
+        <option value="5" {% if selected_month == 5 %}selected{% endif %}>May</option>
+        <option value="6" {% if selected_month == 6 %}selected{% endif %}>June</option>
+        <option value="7" {% if selected_month == 7 %}selected{% endif %}>July</option>
+        <option value="8" {% if selected_month == 8 %}selected{% endif %}>August</option>
+        <option value="9" {% if selected_month == 9 %}selected{% endif %}>September</option>
+        <option value="10" {% if selected_month == 10 %}selected{% endif %}>October</option>
+        <option value="11" {% if selected_month == 11 %}selected{% endif %}>November</option>
+        <option value="12" {% if selected_month == 12 %}selected{% endif %}>December</option>
+      </select>
+      <label class="muted" style="margin:0;">Year</label>
+      <select id="yearSelect" style="width:auto; margin:0;">
+        {% for y in year_options %}
+          <option value="{{ y }}" {% if selected_year == y %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div id="monthlyTotal" style="font-size:20px; font-weight:900;">{{ "%.2f"|format(monthly_total or 0) }} EUR</div>
+    <div class="muted" style="margin-top:6px;">
+      Updated daily at 00:05 (current month). Resets at new month or by manual date.
+    </div>
+  </div>
+
+  <div style="padding:14px 16px; border-radius:14px; background:#0b1220; border:1px solid #334155;">
+    <div class="muted" style="font-weight:900; margin-bottom:6px;">Percent to distribute</div>
+    <form method="post" action="{{ url_for('variable_rewards_percent') }}" style="margin:0;">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <input type="hidden" name="month" value="{{ selected_month }}">
+      <input type="hidden" name="year" value="{{ selected_year }}">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input id="percentInput" name="percent_value" type="number" min="0" max="100" step="1" value="{{ percent_value }}" style="max-width:120px; margin:0;">
+        <span class="muted">%</span>
+      </div>
+    </form>
+    <div class="muted" style="margin-top:6px;">Set percent of total to distribute.</div>
+  </div>
+
+  <div style="padding:14px 16px; border-radius:14px; background:#0b1220; border:1px solid #334155;">
+    <div class="muted" style="font-weight:900; margin-bottom:6px;">Reduced amount of total Airport fees</div>
+    <div id="reducedAmount" style="font-size:20px; font-weight:900;">0.00 EUR</div>
+    <div class="muted" style="margin-top:6px;">Calculated from Total × %.</div>
+  </div>
+</div>
+
+{% if users and users|length > 0 %}
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px;">
+    <form method="post" action="{{ url_for('variable_rewards_save') }}" style="margin:0;">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <input type="hidden" name="month" value="{{ selected_month }}">
+      <input type="hidden" name="year" value="{{ selected_year }}">
+      <button type="submit" style="width:auto; margin:0; height:44px;">Save</button>
+    </form>
+    <form method="get" action="{{ url_for('variable_rewards_print_all') }}" style="margin:0;">
+      <input type="hidden" name="month" value="{{ selected_month }}">
+      <input type="hidden" name="year" value="{{ selected_year }}">
+      <button type="submit" style="width:auto; margin:0; height:44px;">Save PDF</button>
+    </form>
+    <form method="get" action="{{ url_for('variable_rewards_summary') }}" style="margin:0;">
+      <input type="hidden" name="year" value="{{ selected_year }}">
+      <input type="hidden" name="month_from" value="1">
+      <input type="hidden" name="month_to" value="{{ selected_month }}">
+      <button type="submit" style="width:auto; margin:0; height:44px;">Yearly Summary</button>
+    </form>
+  </div>
+  <div style="overflow-x:auto; margin-top:12px;">
+    <table style="width:100%; border-collapse:collapse; border-radius:14px; overflow:hidden; border:1px solid #334155; background:#0b1220;">
+      <thead>
+        <tr>
+          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">#</th>
+          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Full name</th>
+          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Print</th>
+          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Nickname</th>
+          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Role</th>
+          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">%</th>
+          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Total Amount</th>
+          <th style="padding:12px; border-bottom:1px solid #334155; text-align:left;">Active</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for u in users %}
+        <tr data-user-id="{{ u.id }}">
+          <td style="padding:12px; border-bottom:1px solid #334155;">{{ loop.index }}</td>
+          <td style="padding:12px; border-bottom:1px solid #334155;">{{ u.fullname }}</td>
+          <td style="padding:12px; border-bottom:1px solid #334155;">
+            <a class="btn-small" href="{{ url_for('variable_rewards_print', user_id=u.id, month=selected_month, year=selected_year) }}">Print</a>
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #334155;">{{ u.nickname }}</td>
+          <td style="padding:12px; border-bottom:1px solid #334155;">{{ u.role }}</td>
+          <td style="padding:12px; border-bottom:1px solid #334155;">
+            <span class="user-percent">0%</span>
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #334155;">
+            {% set manual_value = manual_amounts.get(u.id|string) %}
+            <form method="post" action="{{ url_for('variable_rewards_manual', user_id=u.id) }}" style="margin:0;" class="manual-form">
+              <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+              <input type="hidden" name="month" value="{{ selected_month }}">
+              <input type="hidden" name="year" value="{{ selected_year }}">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <input class="manual-input" name="manual_amount" type="number" min="0" step="0.01" placeholder="0.00" value="{{ "%.2f"|format(manual_value) if manual_value is not none else '' }}" style="max-width:120px; margin:0;">
+                <span class="muted">EUR</span>
+              </div>
+            </form>
+            <div class="muted" style="margin-top:6px;">
+              Total: <span class="user-total">0.00 EUR</span>
+            </div>
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #334155;">
+            <form method="post" action="{{ url_for('variable_rewards_active', user_id=u.id) }}" style="margin:0;" data-user-id="{{ u.id }}">
+              <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+              <label style="display:inline-flex; align-items:center; gap:8px;">
+                <input class="active-toggle" type="checkbox" name="active" {% if u.active %}checked{% endif %}>
+                <span class="muted">Active</span>
+              </label>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p>No users found.</p>
+{% endif %}
+
+<script>
+  (function () {
+    const monthlyTotalEl = document.getElementById("monthlyTotal");
+    const percentInput = document.getElementById("percentInput");
+    const reducedEl = document.getElementById("reducedAmount");
+    const monthSelect = document.getElementById("monthSelect");
+    const yearSelect = document.getElementById("yearSelect");
+
+    function parseAmount(text) {
+      const raw = String(text || "").replace(/[^\d.,-]/g, "").replace(",", ".");
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function formatAmount(n) {
+      return `${n.toFixed(2)} EUR`;
+    }
+
+    function updateReduced() {
+      const total = parseAmount(monthlyTotalEl ? monthlyTotalEl.textContent : "0");
+      const pct = Number(percentInput ? percentInput.value : 0) || 0;
+      const reduced = total * (pct / 100);
+      if (reducedEl) reducedEl.textContent = formatAmount(reduced);
+
+      const rows = Array.from(document.querySelectorAll("tr[data-user-id]"));
+      const activeRows = rows.filter(r => r.querySelector(".active-toggle")?.checked);
+      let manualSum = 0;
+      let activeWithoutManual = 0;
+      const rowMeta = rows.map(r => {
+        const manualInput = r.querySelector(".manual-input");
+        const manualValue = manualInput ? parseAmount(manualInput.value) : parseAmount(r.querySelector("input[readonly]")?.value || "");
+        const hasManual = Number.isFinite(manualValue) && manualValue > 0;
+        const isActive = !!r.querySelector(".active-toggle")?.checked;
+        if (isActive && hasManual) manualSum += manualValue;
+        if (isActive && !hasManual) activeWithoutManual += 1;
+        return { row: r, isActive, hasManual, manualValue };
+      });
+
+      const remainder = Math.max(0, reduced - manualSum);
+      const perUser = activeWithoutManual ? (remainder / activeWithoutManual) : 0;
+
+      rowMeta.forEach(({ row, isActive, hasManual, manualValue }) => {
+        const totalEl = row.querySelector(".user-total");
+        const pctEl = row.querySelector(".user-percent");
+        if (!totalEl) return;
+        if (!isActive) {
+          totalEl.textContent = formatAmount(0);
+          if (pctEl) pctEl.textContent = "0%";
+        } else if (hasManual) {
+          totalEl.textContent = formatAmount(manualValue);
+          if (pctEl) {
+            const p = reduced > 0 ? (manualValue / reduced) * 100 : 0;
+            pctEl.textContent = `${Math.round(p)}%`;
+          }
+        } else {
+          totalEl.textContent = formatAmount(perUser);
+          if (pctEl) {
+            const p = reduced > 0 ? (perUser / reduced) * 100 : 0;
+            pctEl.textContent = `${Math.round(p)}%`;
+          }
+        }
+      });
+    }
+
+    if (percentInput) {
+      percentInput.addEventListener("input", updateReduced);
+      percentInput.addEventListener("change", () => {
+        const form = percentInput.closest("form");
+        if (form) form.submit();
+      });
+    }
+
+    document.querySelectorAll(".manual-input").forEach(input => {
+      input.addEventListener("input", updateReduced);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const form = input.closest("form");
+          if (form) form.submit();
+        }
+      });
+    });
+
+    document.querySelectorAll(".active-toggle").forEach(cb => {
+      cb.addEventListener("change", () => {
+        updateReduced();
+        const form = cb.closest("form");
+        if (!form) return;
+        const action = form.getAttribute("action");
+        const token = form.querySelector("input[name='csrf_token']")?.value || "";
+        const params = new URLSearchParams();
+        if (token) params.set("csrf_token", token);
+        if (cb.checked) params.set("active", "on");
+        fetch(action, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: params.toString(),
+        });
+      });
+    });
+    function reloadWithParams() {
+      const params = new URLSearchParams(window.location.search);
+      if (monthSelect) params.set("month", monthSelect.value);
+      if (yearSelect) params.set("year", yearSelect.value);
+      window.location.search = params.toString();
+    }
+    if (monthSelect) monthSelect.addEventListener("change", reloadWithParams);
+    if (yearSelect) yearSelect.addEventListener("change", reloadWithParams);
+    updateReduced();
+  })();
+</script>
 {% endblock %}

@@ -266,8 +266,15 @@
     {% set back_url = url_for('airport_service_fees') %}
 {% elif endpoint in ['airport_service_fees'] %}
     {% set back_url = url_for('admin_page') %}
-{% elif endpoint in ['airlines_add','fees_select','airline_detail','airlines_edit','airline_fees','airline_fee_edit'] %}
+{% elif endpoint in [
+    'airlines_add','fees_select','airline_detail','airlines_edit','airline_fees','airline_fee_edit',
+    'airline_destinations','airline_destinations_add','airline_destination_edit','airline_destination_delete'
+] %}
+    {% if endpoint in ['airline_destinations','airline_destinations_add','airline_destination_edit','airline_destination_delete'] %}
+        {% set back_url = url_for('airline_detail', airline_id=request.view_args.get('airline_id')) %}
+    {% else %}
     {% set back_url = url_for('airlines') %}
+    {% endif %}
 {% elif endpoint in ['airlines'] %}
     {% set back_url = url_for('admin_page') %}
 {% elif endpoint in ['reports'] %}
@@ -278,8 +285,12 @@
     {% set back_url = url_for('sales') %}
 {% elif endpoint in ['sales'] %}
     {% set back_url = url_for('admin_hub') %}
+{% elif endpoint in ['variable_rewards_summary'] %}
+    {% set back_url = url_for('variable_rewards') %}
 {% elif endpoint in ['variable_rewards','account_settings'] %}
     {% set back_url = url_for('admin_page') %}
+{% elif endpoint in ['notifications'] %}
+    {% set back_url = url_for('account_settings') %}
 {% elif endpoint in ['admin_page'] %}
     {% set back_url = url_for('admin_hub') %}
 {% elif endpoint in ['change_password'] %}
@@ -298,7 +309,8 @@
     {% set airline_open = endpoint in [
       'airlines','airlines_add','fees_select',
       'airline_detail','airlines_edit',
-      'airline_fees','airline_fee_edit'
+      'airline_fees','airline_fee_edit',
+      'airline_destinations','airline_destinations_add','airline_destination_edit','airline_destination_delete'
     ] %}
     {% set reports_open = endpoint in ['reports'] %}
     {% set rewards_open = endpoint in ['variable_rewards'] %}
@@ -343,6 +355,35 @@
             </div>
         </details>
     </nav>
+    {% endif %}
+
+    {% if session.popup_notifications %}
+    <div id="notifOverlay" style="position:fixed; inset:0; background:rgba(2,6,23,.6); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px;">
+        <div style="max-width:700px; width:100%; background:#0b1220; border:1px solid #334155; border-radius:18px; padding:18px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <h3 style="margin:0;">Notifications</h3>
+                <button id="notifClose" class="pill" type="button" style="margin-left:auto;">Close</button>
+            </div>
+            <div style="display:grid; gap:12px; margin-top:12px;">
+                {% for n in session.popup_notifications %}
+                <div style="padding:12px; border-radius:12px; border:1px solid #334155; background:#111827;">
+                    <div style="font-weight:900;">{{ n.subject }}</div>
+                    <div class="muted" style="margin-top:6px; white-space:pre-line;">{{ n.body }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <script>
+        (function() {
+            const btn = document.getElementById("notifClose");
+            const overlay = document.getElementById("notifOverlay");
+            if (!btn || !overlay) return;
+            btn.addEventListener("click", function() {
+                overlay.style.display = "none";
+            });
+        })();
+    </script>
     {% endif %}
 
 <div class="container">

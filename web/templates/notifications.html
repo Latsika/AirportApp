@@ -1,17 +1,99 @@
 {% extends "layout.html" %}
 
+{% block page_style %}
+<style>
+  :root { --container-max: 100vw; }
+  body { padding: 0; }
+  .app-shell { max-width: none; }
+  .container { width: 100vw; max-width: 100vw; border-radius: 0; }
+  @media (max-width: 700px) {
+    .container { padding: 20px; }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <h2>Notifications</h2>
-<p style="opacity:.85;">Set emails for receiving notifications (placeholder – DB napojíme neskôr).</p>
+<p style="opacity:.85;">Set up to 10 email addresses for notifications.</p>
 
-<div style="max-width:900px;">
-  <label style="opacity:.85;">Emails (one per line):</label>
-  <textarea style="width:100%; min-height:120px; margin-top:8px;"
-            placeholder="admin@company.com&#10;ops@company.com"></textarea>
+<div style="display:flex; flex-direction:column; gap:22px;">
+  <div>
+    <h3 style="margin:0 0 8px;">Notification emails</h3>
+  <form method="post" action="{{ url_for('notifications') }}">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px;">
+      {% for i in range(1, 11) %}
+        {% if emails is mapping %}
+          {% set value = emails.get('email_' ~ i, '') %}
+        {% else %}
+          {% set value = emails[i-1] if emails and emails|length >= i else '' %}
+        {% endif %}
+        <div>
+          <label class="muted" style="margin:0 0 6px; display:block;">Email {{ i }}</label>
+          <input type="email" name="email_{{ i }}" value="{{ value }}" placeholder="name@company.com" style="margin:0;">
+        </div>
+      {% endfor %}
+    </div>
 
-  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
-    <button class="pill" type="button" onclick="alert('Saved (placeholder). Implement DB later.')">SAVE</button>
-    <button class="pill" type="button" onclick="location.href='{{ url_for('account_settings') }}'">BACK</button>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+      <button type="submit" style="width:auto; margin:0;">Save</button>
+      <a class="pill" href="{{ url_for('account_settings') }}">Back</a>
+    </div>
+  </form>
+  </div>
+
+  <div>
+    <h3 style="margin:0 0 8px;">Notification templates</h3>
+    <p class="muted" style="margin:0 0 10px;">
+      Use variables: {UserName}, {ReportDate}, {ReportMonth}
+    </p>
+
+    {% if templates and templates|length > 0 %}
+      <div style="display:grid; gap:12px;">
+        {% for t in templates %}
+          <form method="post" action="{{ url_for('notification_template_update', template_id=t.id) }}"
+                style="padding:12px; border-radius:14px; border:1px solid #334155; background:#0b1220;">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+              <input type="text" name="name" value="{{ t.name }}" style="max-width:360px; margin:0;">
+              <span class="muted">Slug: {{ t.slug }}</span>
+              <label style="display:inline-flex; align-items:center; gap:8px; margin-left:auto;">
+                <input type="checkbox" name="enabled" {% if t.enabled %}checked{% endif %}>
+                <span class="muted">Enabled</span>
+              </label>
+            </div>
+            <div style="display:grid; gap:10px;">
+              <input type="text" name="subject" value="{{ t.subject }}" placeholder="Subject" style="margin:0;">
+              <textarea name="body" rows="3" placeholder="Body">{{ t.body }}</textarea>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:10px;">
+              <button type="submit" style="width:auto; margin:0;">Save</button>
+            </div>
+          </form>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No templates yet.</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('notification_template_create') }}"
+          style="margin-top:14px; padding:12px; border-radius:14px; border:1px dashed #334155; background:#0b1220;">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+        <input type="text" name="name" placeholder="New template name" style="max-width:360px; margin:0;">
+        <label style="display:inline-flex; align-items:center; gap:8px; margin-left:auto;">
+          <input type="checkbox" name="enabled" checked>
+          <span class="muted">Enabled</span>
+        </label>
+      </div>
+      <div style="display:grid; gap:10px;">
+        <input type="text" name="subject" placeholder="Subject" style="margin:0;">
+        <textarea name="body" rows="3" placeholder="Body"></textarea>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button type="submit" style="width:auto; margin:0;">Create</button>
+      </div>
+    </form>
   </div>
 </div>
 {% endblock %}

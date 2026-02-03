@@ -1,12 +1,62 @@
 {% extends "layout.html" %}
 
+{% block page_style %}
+<style>
+  :root { --container-max: 100vw; }
+  body { padding: 0; }
+  .app-shell { max-width: none; }
+  .container { width: 100vw; max-width: 100vw; border-radius: 0; }
+  @media (max-width: 700px) {
+    .container { padding: 20px; }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <h2>Account settings</h2>
 
 <div style="display:flex; flex-direction:column; gap:10px; max-width:900px;">
-  <a class="pill" href="{{ url_for('notifications') }}">Notifications</a>
-  <p style="opacity:.85;">
-    Placeholder – detailné nastavenia doplníme neskôr.
-  </p>
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+    <a class="pill" href="{{ url_for('notifications') }}">Create notifications</a>
+  </div>
+  <p style="opacity:.85;">Manage notification emails for the system.</p>
+</div>
+
+<div style="max-width:900px; margin-top:16px;">
+  <h3 style="margin:0 0 8px;">SMTP settings</h3>
+  <form method="post" action="{{ url_for('account_settings_smtp') }}">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px;">
+      <div>
+        <label class="muted" style="margin:0 0 6px; display:block;">SMTP Host</label>
+        <input type="text" name="smtp_host" value="{{ smtp.host if smtp else '' }}" placeholder="smtp.company.com" style="margin:0;">
+      </div>
+      <div>
+        <label class="muted" style="margin:0 0 6px; display:block;">SMTP Port</label>
+        <input type="number" name="smtp_port" value="{{ smtp.port if smtp else '587' }}" placeholder="587" style="margin:0;">
+      </div>
+      <div>
+        <label class="muted" style="margin:0 0 6px; display:block;">SMTP User</label>
+        <input type="text" name="smtp_user" value="{{ smtp.user if smtp else '' }}" placeholder="user@company.com" style="margin:0;">
+      </div>
+      <div>
+        <label class="muted" style="margin:0 0 6px; display:block;">SMTP Password</label>
+        <input type="password" name="smtp_password" placeholder="••••••••" style="margin:0;">
+      </div>
+      <div>
+        <label class="muted" style="margin:0 0 6px; display:block;">Sender (optional)</label>
+        <input type="text" name="smtp_sender" value="{{ smtp.sender if smtp else '' }}" placeholder="no-reply@company.com" style="margin:0;">
+      </div>
+      <div style="display:flex; align-items:flex-end;">
+        <label style="display:inline-flex; align-items:center; gap:8px; margin:0;">
+          <input type="checkbox" name="smtp_tls" {% if smtp and smtp.tls != '0' %}checked{% endif %}>
+          <span class="muted">Use TLS</span>
+        </label>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+      <button type="submit" style="width:auto; margin:0;">Save SMTP</button>
+    </div>
+  </form>
 </div>
 {% endblock %}

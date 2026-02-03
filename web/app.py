@@ -6,7 +6,9 @@ import re
 import sqlite3
 import sys
 import time
+import json
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from email.message import EmailMessage
 from io import BytesIO, StringIO
 from functools import wraps
@@ -46,6 +48,8 @@ from reportlab.lib.pagesizes import letter, A4, landscape
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.barcharts import VerticalBarChart
 from reportlab.graphics.charts.textlabels import Label
@@ -82,12 +86,41 @@ def _month_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m")
 
 
+def _month_date_range(year: int, month: int) -> tuple[str, str]:
+    month = min(12, max(1, month))
+    start_date = datetime(year, month, 1, tzinfo=timezone.utc).date()
+    if month == 12:
+        end_date = datetime(year + 1, 1, 1, tzinfo=timezone.utc).date() - timedelta(days=1)
+    else:
+        end_date = datetime(year, month + 1, 1, tzinfo=timezone.utc).date() - timedelta(days=1)
+    return start_date.isoformat(), end_date.isoformat()
+
+
+def _compute_monthly_airport_total(year: int, month: int) -> float:
+    start_date, end_date = _month_date_range(year, month)
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT SUM(si.total_amount) AS total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            WHERE si.fee_source = 'airport'
+              AND date(s.sold_at_utc) BETWEEN ? AND ?
+            """,
+            (start_date, end_date),
+        )
+        row = cur.fetchone()
+    return float(row["total"] or 0)
+
 def _report_rows_by_airline(conn, date_filter: str, is_month: bool, source: str):
     cur = conn.cursor()
     if is_month:
         cur.execute(
             """
             SELECT a.id, a.name, a.code,
+                   d.dest_name AS destination_name,
+                   d.dest_code AS destination_code,
                    CASE
                        WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_key, si.fee_key)
                        WHEN si.fee_source = 'airport' THEN COALESCE(apf.fee_key, si.fee_key)
@@ -104,11 +137,12 @@ def _report_rows_by_airline(conn, date_filter: str, is_month: bool, source: str)
             FROM sale_items si
             JOIN sales s ON s.id = si.sale_id
             JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airline_destinations d ON d.id = s.destination_id
             LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
             LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
             WHERE si.fee_source = ? AND substr(s.sold_at_utc, 1, 7) = ?
-            GROUP BY a.id, 4, 5
-            ORDER BY a.name COLLATE NOCASE ASC, 5 COLLATE NOCASE ASC
+            GROUP BY a.id, d.id, 6, 7
+            ORDER BY a.name COLLATE NOCASE ASC, d.dest_name COLLATE NOCASE ASC, 7 COLLATE NOCASE ASC
             """,
             (source, date_filter),
         )
@@ -116,6 +150,8 @@ def _report_rows_by_airline(conn, date_filter: str, is_month: bool, source: str)
         cur.execute(
             """
             SELECT a.id, a.name, a.code,
+                   d.dest_name AS destination_name,
+                   d.dest_code AS destination_code,
                    CASE
                        WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_key, si.fee_key)
                        WHEN si.fee_source = 'airport' THEN COALESCE(apf.fee_key, si.fee_key)
@@ -132,11 +168,12 @@ def _report_rows_by_airline(conn, date_filter: str, is_month: bool, source: str)
             FROM sale_items si
             JOIN sales s ON s.id = si.sale_id
             JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airline_destinations d ON d.id = s.destination_id
             LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
             LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
             WHERE si.fee_source = ? AND date(s.sold_at_utc) = ?
-            GROUP BY a.id, 4, 5
-            ORDER BY a.name COLLATE NOCASE ASC, 5 COLLATE NOCASE ASC
+            GROUP BY a.id, d.id, 6, 7
+            ORDER BY a.name COLLATE NOCASE ASC, d.dest_name COLLATE NOCASE ASC, 7 COLLATE NOCASE ASC
             """,
             (source, date_filter),
         )
@@ -229,7 +266,15 @@ def _load_custom_report_filters():
             "SELECT id, fullname, nickname FROM users ORDER BY fullname COLLATE NOCASE ASC"
         )
         sellers = cur.fetchall()
-    return airlines, airline_items, airport_items, sellers
+        cur.execute(
+            """
+            SELECT id, airline_id, dest_code, dest_name, active
+            FROM airline_destinations
+            ORDER BY dest_name COLLATE NOCASE ASC
+            """
+        )
+        destinations = cur.fetchall()
+    return airlines, airline_items, airport_items, sellers, destinations
 
 
 def _parse_custom_report_filters(args):
@@ -238,6 +283,7 @@ def _parse_custom_report_filters(args):
     date_from, date_to = _normalize_date_range(date_from, date_to)
 
     selected_airlines = args.getlist("airline_id")
+    selected_destinations = args.getlist("destination_id")
     selected_items = args.getlist("item_id")
     selected_payments = args.getlist("payment_method")
     selected_sellers = args.getlist("sold_by")
@@ -268,6 +314,7 @@ def _parse_custom_report_filters(args):
                 continue
 
     airline_ids = [int(x) for x in selected_airlines if x.isdigit()]
+    destination_ids = [int(x) for x in selected_destinations if x.isdigit()]
     payment_methods = [x for x in selected_payments if x in {"CASH", "CARD"}]
     sold_by_ids = [int(x) for x in selected_sellers if x.isdigit()]
 
@@ -283,6 +330,7 @@ def _parse_custom_report_filters(args):
         "date_from": date_from,
         "date_to": date_to,
         "airline_ids": airline_ids,
+        "destination_ids": destination_ids,
         "payment_methods": payment_methods,
         "sold_by_ids": sold_by_ids,
         "airline_item_ids": airline_item_ids,
@@ -296,6 +344,7 @@ def _parse_custom_report_filters(args):
         "date_from": date_from,
         "date_to": date_to,
         "selected_airlines": selected_airlines,
+        "selected_destinations": selected_destinations,
         "selected_items": selected_items,
         "selected_payments": selected_payments,
         "selected_sellers": selected_sellers,
@@ -333,6 +382,11 @@ def _custom_report_where(filters: dict):
         placeholders = ",".join(["?"] * len(filters["airline_ids"]))
         where.append(f"s.airline_id IN ({placeholders})")
         params.extend(filters["airline_ids"])
+
+    if filters.get("destination_ids"):
+        placeholders = ",".join(["?"] * len(filters["destination_ids"]))
+        where.append(f"s.destination_id IN ({placeholders})")
+        params.extend(filters["destination_ids"])
 
     if filters["payment_methods"]:
         placeholders = ",".join(["?"] * len(filters["payment_methods"]))
@@ -395,6 +449,8 @@ def _build_custom_report(filters: dict):
             s.id AS sale_id,
             a.name AS airline_name,
             a.code AS airline_code,
+            d.dest_name AS destination_name,
+            d.dest_code AS destination_code,
             s.sold_at_utc,
             s.payment_method,
             u.fullname AS sold_by_name,
@@ -415,11 +471,13 @@ def _build_custom_report(filters: dict):
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
         JOIN airlines a ON a.id = s.airline_id
+        LEFT JOIN airline_destinations d ON d.id = s.destination_id
         LEFT JOIN users u ON u.id = s.created_by
         LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
         LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
         WHERE {" AND ".join(where)}
-        ORDER BY s.sold_at_utc DESC, a.name COLLATE NOCASE ASC, fee_name COLLATE NOCASE ASC
+        ORDER BY s.sold_at_utc DESC, a.name COLLATE NOCASE ASC, d.dest_name COLLATE NOCASE ASC,
+                 fee_name COLLATE NOCASE ASC
     """
     with get_connection() as conn:
         cur = conn.cursor()
@@ -442,11 +500,23 @@ def _build_custom_report(filters: dict):
         date_list.append(d.isoformat())
         d += timedelta(days=1)
 
+    def _destination_label(row):
+        name = (row["destination_name"] or "").strip()
+        code = (row["destination_code"] or "").strip()
+        if name and code:
+            return f"{name} ({code})"
+        if name:
+            return name
+        if code:
+            return code
+        return ""
+
     series = {}
     for r in rows:
         date_key = (r["sold_at_utc"] or "")[:10]
         if not date_key:
             continue
+        dest_label = _destination_label(r)
         if r["fee_source"] == "airport":
             series_key = f"Airport - {r['fee_key']}" if r["fee_key"] else "Airport"
         elif r["fee_source"] == "ticket":
@@ -463,6 +533,8 @@ def _build_custom_report(filters: dict):
             series_key = r["fee_key"]
         else:
             series_key = r["fee_name"] or "Item"
+        if dest_label and filters.get("destination_ids"):
+            series_key = f"{series_key} @ {dest_label}"
         if series_key not in series:
             series[series_key] = {k: 0 for k in date_list}
         series[series_key][date_key] = series[series_key].get(date_key, 0) + int(r["quantity"] or 0)
@@ -490,6 +562,8 @@ def _custom_report_items_by_source(filters: dict, source: str):
 
     sql = f"""
         SELECT a.id, a.name, a.code,
+               d.dest_name AS destination_name,
+               d.dest_code AS destination_code,
                CASE
                    WHEN si.fee_source = 'ticket' THEN 'TICKET'
                    WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_key, si.fee_key)
@@ -508,11 +582,13 @@ def _custom_report_items_by_source(filters: dict, source: str):
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
         JOIN airlines a ON a.id = s.airline_id
+        LEFT JOIN airline_destinations d ON d.id = s.destination_id
         LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
         LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
         WHERE {" AND ".join(where)}
-        GROUP BY a.id, 4, 5
-        ORDER BY a.name COLLATE NOCASE ASC, 5 COLLATE NOCASE ASC
+        GROUP BY a.id, d.id, 6, 7
+        ORDER BY a.name COLLATE NOCASE ASC, d.dest_name COLLATE NOCASE ASC,
+                 7 COLLATE NOCASE ASC
     """
     with get_connection() as conn:
         cur = conn.cursor()
@@ -691,7 +767,19 @@ def _custom_report_to_pdf(title: str, rows, chart_data, date_from: str, date_to:
 
         header_row = table_rows[0]
         data_rows = table_rows[1:]
-        if header_row == ["Airline", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"]:
+        if header_row == ["Airline", "Destination", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"]:
+            col_widths = [
+                page_width * 0.16,
+                page_width * 0.18,
+                page_width * 0.12,
+                page_width * 0.22,
+                page_width * 0.06,
+                page_width * 0.10,
+                page_width * 0.08,
+                page_width * 0.08,
+            ]
+            elements.append(make_table([header_row] + data_rows, col_widths))
+        elif header_row == ["Airline", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"]:
             col_widths = [
                 page_width * 0.18,
                 page_width * 0.14,
@@ -845,7 +933,8 @@ def admin_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         if not (session.get("logged_in") and session.get("role") == "Admin"):
-            flash("Admin privileges required.")
+            if session.get("logged_in"):
+                return redirect(url_for("user_hub"))
             return redirect(url_for("index"))
         return f(*args, **kwargs)
 
@@ -872,6 +961,449 @@ def require_csrf() -> None:
 
 def _sanitize(value: str) -> str:
     return (value or "").strip()
+
+
+def _is_valid_email(value: str) -> bool:
+    if not value or "@" not in value:
+        return False
+    local, _, domain = value.rpartition("@")
+    if not local or not domain or "." not in domain:
+        return False
+    return True
+
+
+DEFAULT_NOTIFICATION_TEMPLATES = [
+    {
+        "slug": "new_user_created",
+        "name": "New user created (waiting approval)",
+        "subject": "New user created - {UserName} waiting for approval",
+        "body": "New user created - {UserName} waiting for approval.",
+    },
+    {
+        "slug": "daily_report_created",
+        "name": "Daily report created",
+        "subject": "Daily report created by {UserName} ({ReportDate})",
+        "body": "Daily report created by {UserName} for {ReportDate}.",
+    },
+    {
+        "slug": "monthly_report_created",
+        "name": "Monthly report created",
+        "subject": "Monthly report created by {UserName} ({ReportMonth})",
+        "body": "Monthly report created by {UserName} for {ReportMonth}.",
+    },
+    {
+        "slug": "daily_report_not_created",
+        "name": "Daily report NOT created",
+        "subject": "Daily report NOT created ({ReportDate})",
+        "body": "Daily report was not created for {ReportDate}.",
+    },
+    {
+        "slug": "monthly_report_not_created",
+        "name": "Monthly report NOT created",
+        "subject": "Monthly report NOT created ({ReportMonth})",
+        "body": "Monthly report was not created for {ReportMonth}.",
+    },
+    {
+        "slug": "user_deleted",
+        "name": "User deleted",
+        "subject": "User deleted - {UserName}",
+        "body": "User deleted - {UserName}.",
+    },
+]
+
+
+def _ensure_default_notification_templates() -> None:
+    now = _utc_now_iso()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        for t in DEFAULT_NOTIFICATION_TEMPLATES:
+            cur.execute("SELECT 1 FROM notification_templates WHERE slug = ?", (t["slug"],))
+            if cur.fetchone():
+                continue
+            cur.execute(
+                """
+                INSERT INTO notification_templates (name, slug, subject, body, enabled, created_at_utc, updated_at_utc)
+                VALUES (?, ?, ?, ?, 1, ?, ?)
+                """,
+                (t["name"], t["slug"], t["subject"], t["body"], now, now),
+            )
+        conn.commit()
+
+
+def _slugify(value: str) -> str:
+    value = (value or "").strip().lower()
+    value = re.sub(r"[^a-z0-9]+", "_", value)
+    value = value.strip("_")
+    return value or "notification"
+
+
+def _render_notification_text(text: str, context: dict[str, str]) -> str:
+    result = text or ""
+    for key, val in context.items():
+        result = result.replace("{" + key + "}", str(val))
+    return result
+
+
+def _get_popup_queue() -> list[dict]:
+    raw = get_app_state("notifications_popup_queue")
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_popup_queue(items: list[dict]) -> None:
+    set_app_state("notifications_popup_queue", json.dumps(items))
+
+
+def _enqueue_popup(subject: str, body: str) -> None:
+    items = _get_popup_queue()
+    items.append(
+        {
+            "subject": subject,
+            "body": body,
+            "created_at": _utc_now_iso(),
+        }
+    )
+    _save_popup_queue(items)
+
+
+def _send_popup_digest(items: list[dict]) -> None:
+    if not items:
+        return
+    recipients = _notification_recipients()
+    if not recipients:
+        return
+    lines = []
+    for it in items:
+        subj = it.get("subject", "")
+        body = it.get("body", "")
+        lines.append(f"- {subj}")
+        if body:
+            lines.append(f"  {body}")
+        lines.append("")
+    subject = "Notifications summary"
+    body = "\n".join(lines).strip()
+    _send_notification_email(subject, body, recipients)
+
+
+def _notification_recipients() -> list[str]:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT email FROM notification_emails ORDER BY id ASC")
+        rows = cur.fetchall()
+    return [r["email"] for r in rows]
+
+
+def _send_notification_email(subject: str, body: str, recipients: list[str]) -> None:
+    host = (get_app_state("smtp_host") or os.environ.get("SMTP_HOST", "")).strip()
+    if not host or not recipients:
+        return
+    port_raw = (get_app_state("smtp_port") or os.environ.get("SMTP_PORT", "587")).strip()
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 587
+    user = (get_app_state("smtp_user") or os.environ.get("SMTP_USER", "")).strip()
+    password = (get_app_state("smtp_password") or os.environ.get("SMTP_PASSWORD", "")).strip()
+    sender = (get_app_state("smtp_sender") or os.environ.get("SMTP_SENDER", user or "no-reply@airportapp.local")).strip()
+    use_tls = (get_app_state("smtp_tls") or "1") != "0"
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = ", ".join(recipients)
+    msg.set_content(body)
+
+    with smtplib.SMTP(host, port, timeout=10) as smtp:
+        if use_tls:
+            smtp.starttls()
+        if user and password:
+            smtp.login(user, password)
+        smtp.send_message(msg)
+
+
+def _log_notification(
+    template_id: int | None,
+    event_key: str,
+    recipients: list[str],
+    subject: str,
+    body: str,
+    success: bool,
+    error: str | None = None,
+) -> None:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO notification_logs (
+                template_id, event_key, sent_to, subject, body, success, error, created_at_utc
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                template_id,
+                event_key,
+                ", ".join(recipients),
+                subject,
+                body,
+                1 if success else 0,
+                error,
+                _utc_now_iso(),
+            ),
+        )
+        conn.commit()
+
+
+def send_notification(event_key: str, context: dict[str, str]) -> None:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, subject, body, enabled FROM notification_templates WHERE slug = ?",
+            (event_key,),
+        )
+        tpl = cur.fetchone()
+    if not tpl or int(tpl["enabled"] or 0) != 1:
+        return
+
+    recipients = _notification_recipients()
+    if not recipients:
+        return
+
+    subject = _render_notification_text(tpl["subject"], context)
+    body = _render_notification_text(tpl["body"], context)
+    _enqueue_popup(subject, body)
+
+    try:
+        _send_notification_email(subject, body, recipients)
+        _log_notification(tpl["id"], event_key, recipients, subject, body, True)
+    except Exception as exc:
+        _log_notification(tpl["id"], event_key, recipients, subject, body, False, str(exc))
+
+
+def _format_month_label(month_key: str) -> str:
+    try:
+        dt = datetime.strptime(month_key, "%Y-%m")
+        return dt.strftime("%B %Y")
+    except Exception:
+        return month_key
+
+
+_ensure_default_notification_templates()
+
+
+def _log_report_snapshot(report_type: str, date_key: str, user_id: int | None) -> None:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO report_snapshots (report_type, date_key, created_by, created_at_utc)
+            VALUES (?, ?, ?, ?)
+            """,
+            (report_type, date_key, user_id, _utc_now_iso()),
+        )
+        conn.commit()
+
+
+def _report_snapshot_exists(report_type: str, date_key: str) -> bool:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT 1 FROM report_snapshots WHERE report_type = ? AND date_key = ?",
+            (report_type, date_key),
+        )
+        return cur.fetchone() is not None
+
+
+def _run_notification_checks() -> None:
+    tz = ZoneInfo("Europe/Bratislava")
+    now_local = datetime.now(tz)
+    last_run_raw = get_app_state("notifications_last_check_ts")
+    try:
+        last_run = int(last_run_raw) if last_run_raw else 0
+    except ValueError:
+        last_run = 0
+    if int(time.time()) - last_run < 300:
+        return
+    set_app_state("notifications_last_check_ts", str(int(time.time())))
+
+    if now_local.hour < 8:
+        return
+
+    today = now_local.date()
+
+    # Daily report not created check (for yesterday)
+    yesterday = today - timedelta(days=1)
+    y_key = yesterday.isoformat()
+    last_daily_key = get_app_state("notifications_daily_not_created_last")
+    if last_daily_key != y_key:
+        if not _report_snapshot_exists("daily", y_key):
+            send_notification(
+                "daily_report_not_created",
+                {"ReportDate": y_key},
+            )
+        set_app_state("notifications_daily_not_created_last", y_key)
+
+    # Monthly report not created check (first day of month for previous month)
+    if today.day == 1:
+        prev_month = (today.replace(day=1) - timedelta(days=1))
+        m_key = prev_month.strftime("%Y-%m")
+        last_month_key = get_app_state("notifications_monthly_not_created_last")
+        if last_month_key != m_key:
+            if not _report_snapshot_exists("monthly", m_key):
+                send_notification(
+                    "monthly_report_not_created",
+                    {"ReportMonth": _format_month_label(m_key)},
+                )
+            set_app_state("notifications_monthly_not_created_last", m_key)
+
+
+def _compute_variable_rewards_distribution(year: int, month: int):
+    monthly_total = _compute_monthly_airport_total(year, month)
+    percent_key = f"variable_rewards_percent_{year}_{month:02d}"
+    percent_raw = get_app_state(percent_key) or "100"
+    try:
+        percent_value = float(percent_raw)
+    except ValueError:
+        percent_value = 100.0
+    percent_value = round(min(100.0, max(0.0, percent_value)))
+    reduced_total = monthly_total * (percent_value / 100)
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, fullname, nickname, role, active "
+            "FROM users ORDER BY fullname COLLATE NOCASE ASC"
+        )
+        users = cur.fetchall()
+
+    manual_map = {}
+    for u in users:
+        key = f"variable_rewards_manual_{year}_{month:02d}_{u['id']}"
+        raw = get_app_state(key)
+        if raw is None:
+            continue
+        try:
+            manual_map[u["id"]] = float(raw)
+        except ValueError:
+            continue
+
+    active_users = [u for u in users if int(u["active"] or 0) == 1]
+    active_manual_sum = sum(
+        manual_map.get(u["id"], 0.0) for u in active_users if manual_map.get(u["id"], 0.0) > 0
+    )
+    active_without_manual = [
+        u for u in active_users if manual_map.get(u["id"], 0.0) <= 0
+    ]
+    remainder = max(0.0, reduced_total - active_manual_sum)
+    per_user = remainder / len(active_without_manual) if active_without_manual else 0.0
+
+    computed = []
+    for u in users:
+        manual_amount = manual_map.get(u["id"], 0.0)
+        if int(u["active"] or 0) != 1:
+            computed_amount = 0.0
+        elif manual_amount > 0:
+            computed_amount = manual_amount
+        else:
+            computed_amount = per_user
+        computed.append(
+            {
+                "id": u["id"],
+                "fullname": u["fullname"],
+                "nickname": u["nickname"],
+                "role": u["role"],
+                "active": int(u["active"] or 0),
+                "manual_amount": float(manual_amount),
+                "computed_amount": float(computed_amount),
+            }
+        )
+
+    return monthly_total, percent_value, reduced_total, computed
+
+
+def _save_variable_rewards_snapshot(
+    year: int,
+    month: int,
+    monthly_total: float,
+    percent_value: float,
+    reduced_total: float,
+    computed_users: list[dict],
+) -> None:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        now = _utc_now_iso()
+        for u in computed_users:
+            cur.execute(
+                """
+                INSERT INTO variable_rewards_snapshots (
+                    year, month, scope, user_id,
+                    total_monthly, percent, reduced_total, manual_amount, computed_amount, created_at_utc
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(year, month, scope, user_id) DO UPDATE SET
+                    total_monthly = excluded.total_monthly,
+                    percent = excluded.percent,
+                    reduced_total = excluded.reduced_total,
+                    manual_amount = excluded.manual_amount,
+                    computed_amount = excluded.computed_amount,
+                    created_at_utc = excluded.created_at_utc
+                """,
+                (
+                    year,
+                    month,
+                    "monthly",
+                    u["id"],
+                    float(monthly_total),
+                    float(percent_value),
+                    float(reduced_total),
+                    float(u["manual_amount"]),
+                    float(u["computed_amount"]),
+                    now,
+                ),
+            )
+
+        cur.execute(
+            """
+            SELECT user_id, SUM(computed_amount) AS total
+            FROM variable_rewards_snapshots
+            WHERE year = ? AND scope = 'monthly' AND month BETWEEN 1 AND ?
+            GROUP BY user_id
+            """,
+            (year, month),
+        )
+        ytd_map = {r["user_id"]: float(r["total"] or 0) for r in cur.fetchall()}
+        for u in computed_users:
+            ytd_total = ytd_map.get(u["id"], 0.0)
+            cur.execute(
+                """
+                INSERT INTO variable_rewards_snapshots (
+                    year, month, scope, user_id,
+                    total_monthly, percent, reduced_total, manual_amount, computed_amount, created_at_utc
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(year, month, scope, user_id) DO UPDATE SET
+                    computed_amount = excluded.computed_amount,
+                    created_at_utc = excluded.created_at_utc
+                """,
+                (
+                    year,
+                    month,
+                    "yearly",
+                    u["id"],
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    float(ytd_total),
+                    now,
+                ),
+            )
+
+        conn.commit()
 
 
 def _send_admin_email_new_user(fullname: str, nickname: str) -> None:
@@ -919,6 +1451,8 @@ def _sale_snapshot(conn, sale_id: int) -> dict:
             s.id,
             a.name AS airline_name,
             a.code AS airline_code,
+            d.dest_name AS destination_name,
+            d.dest_code AS destination_code,
             s.sold_at_utc,
             s.grand_total AS total_amount,
             s.cash_amount,
@@ -958,6 +1492,7 @@ def _sale_snapshot(conn, sale_id: int) -> dict:
             ) AS items_label
         FROM sales s
         JOIN airlines a ON a.id = s.airline_id
+        LEFT JOIN airline_destinations d ON d.id = s.destination_id
         WHERE s.id = ?
         """,
         (sale_id,),
@@ -979,10 +1514,25 @@ def _format_sale_changes(before: dict, after: dict) -> str:
             return f"{row['airline_name']} ({row['airline_code']})"
         return row["airline_name"]
 
+    def _destination_label(row: dict) -> str:
+        name = (row.get("destination_name") or "").strip()
+        code = (row.get("destination_code") or "").strip()
+        if name and code:
+            return f"{name} ({code})"
+        if name:
+            return name
+        if code:
+            return code
+        return "-"
+
     changes = []
 
     if _airline_label(before) != _airline_label(after):
         changes.append(f"Airline: {_airline_label(before)} -> {_airline_label(after)}")
+    if _destination_label(before) != _destination_label(after):
+        changes.append(
+            f"Destination: {_destination_label(before)} -> {_destination_label(after)}"
+        )
 
     for key, label in [
         ("payment_method", "Payment"),
@@ -1009,6 +1559,22 @@ def _format_sale_changes(before: dict, after: dict) -> str:
 @app.before_request
 def enforce_session_timeout_and_single_user():
     session.setdefault("csrf_token", token_urlsafe(32))
+
+    try:
+        _run_notification_checks()
+    except Exception:
+        pass
+
+    if session.get("logged_in") and session.get("role") == "Admin":
+        if not session.get("popup_notifications"):
+            queue = _get_popup_queue()
+            if queue:
+                try:
+                    _send_popup_digest(queue)
+                except Exception:
+                    pass
+                session["popup_notifications"] = queue
+                set_app_state("notifications_popup_queue", "")
 
     if not session.get("logged_in"):
         return
@@ -1239,6 +1805,10 @@ def register():
         _send_admin_email_new_user(fullname=fullname, nickname=nickname)
     except Exception:
         pass
+    try:
+        send_notification("new_user_created", {"UserName": fullname})
+    except Exception:
+        pass
 
     flash("✅ Account created. Waiting for Admin approval. You can login after approval.")
     return redirect(url_for("index"))
@@ -1400,6 +1970,15 @@ def _load_sale_fee_data():
         )
         airport_fees = cur.fetchall()
 
+        cur.execute(
+            """
+            SELECT id, airline_id, dest_code, dest_name, active
+            FROM airline_destinations
+            ORDER BY dest_name COLLATE NOCASE ASC
+            """
+        )
+        destinations = cur.fetchall()
+
     airline_fees_map = {}
     for f in airline_fees:
         airline_fees_map.setdefault(f["airline_id"], []).append(
@@ -1425,23 +2004,38 @@ def _load_sale_fee_data():
         for f in airport_fees
     ]
 
-    return airlines, airline_fees_map, airport_fees_list
+    destinations_map = {}
+    for d in destinations:
+        destinations_map.setdefault(d["airline_id"], []).append(
+            {
+                "id": d["id"],
+                "dest_code": d["dest_code"],
+                "dest_name": d["dest_name"],
+                "active": d["active"],
+            }
+        )
+
+    return airlines, airline_fees_map, airport_fees_list, destinations_map
 
 
 @app.route("/sale/new", methods=["GET", "POST"], endpoint="sale_new")
 @login_required
 def sale_new():
     if request.method == "GET":
-        airlines, airline_fees_map, airport_fees_list = _load_sale_fee_data()
+        airlines, airline_fees_map, airport_fees_list, destinations_map = _load_sale_fee_data()
         return render_template(
             "sale_new.html",
             airlines=airlines,
             airline_fees_map=airline_fees_map,
             airport_fees=airport_fees_list,
+            destinations_map=destinations_map,
         )
 
     require_csrf()
     airline_id_raw = request.form.get("airline_id") or ""
+    destination_id_raw = request.form.get("destination_id") or ""
+    pnr = _sanitize(request.form.get("pnr"))
+    passenger_name = _sanitize(request.form.get("passenger_name"))
     ticket_qty_raw = request.form.get("ticket_qty") or "0"
     ticket_amount = _parse_amount(request.form.get("ticket_amount"))
     payment_method = _sanitize(request.form.get("payment_method")).upper() or "CASH"
@@ -1449,6 +2043,7 @@ def sale_new():
 
     try:
         airline_id = int(airline_id_raw)
+        destination_id = int(destination_id_raw)
         ticket_qty = max(0, int(ticket_qty_raw))
     except ValueError:
         flash("Invalid input.")
@@ -1460,6 +2055,19 @@ def sale_new():
         airline_row = cur.fetchone()
         if not airline_row:
             flash("Airline not found.")
+            return redirect(url_for("sale_new"))
+
+        cur.execute(
+            """
+            SELECT id, dest_name, dest_code, active
+            FROM airline_destinations
+            WHERE id = ? AND airline_id = ?
+            """,
+            (destination_id, airline_id),
+        )
+        destination_row = cur.fetchone()
+        if not destination_row:
+            flash("Destination not found for selected airline.")
             return redirect(url_for("sale_new"))
 
         if payment_method not in {"CASH", "CARD"}:
@@ -1575,15 +2183,18 @@ def sale_new():
         cur.execute(
             """
             INSERT INTO sales (
-                sale_group_id, airline_id, sold_at_utc, created_by,
+                sale_group_id, airline_id, destination_id, pnr, passenger_name, sold_at_utc, created_by,
                 payment_method, cash_amount, card_amount, grand_total,
                 fee_source, fee_id, fee_name, amount, currency, quantity, total_amount
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 sale_group_id,
                 airline_id,
+                destination_id,
+                pnr or None,
+                passenger_name or None,
                 now,
                 session.get("user_id"),
                 payment_method,
@@ -1631,15 +2242,20 @@ def sale_new():
 @app.get("/sales_list", endpoint="sales_list")
 @login_required
 def sales_list():
+    q_raw = _sanitize(request.args.get("q"))
+    q = f"%{q_raw}%" if q_raw else ""
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
-            """
+        sql = """
             SELECT
                 s.id,
                 s.sale_group_id,
+                s.pnr,
+                s.passenger_name,
                 a.name AS airline_name,
                 a.code AS airline_code,
+                d.dest_name AS destination_name,
+                d.dest_code AS destination_code,
                 s.sold_at_utc,
                 s.grand_total AS total_amount,
                 s.cash_amount,
@@ -1681,12 +2297,17 @@ def sales_list():
                 ) AS items_label
             FROM sales s
             JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airline_destinations d ON d.id = s.destination_id
             LEFT JOIN users u ON u.id = s.created_by
-            ORDER BY s.id DESC
-            """
-        )
+        """
+        params = []
+        if q:
+            sql += " WHERE (s.pnr LIKE ? OR s.passenger_name LIKE ?)"
+            params.extend([q, q])
+        sql += " ORDER BY s.id DESC"
+        cur.execute(sql, params)
         rows = cur.fetchall()
-    return render_template("sales_list.html", sales=rows)
+    return render_template("sales_list.html", sales=rows, q=q_raw)
 
 
 @app.route("/sales/<int:sale_id>/edit", methods=["GET", "POST"], endpoint="sale_edit")
@@ -1710,7 +2331,7 @@ def sale_edit(sale_id: int):
             flash("Sale not found.")
             return redirect(url_for("sales_list"))
 
-        airlines, airline_fees_map, airport_fees_list = _load_sale_fee_data()
+        airlines, airline_fees_map, airport_fees_list, destinations_map = _load_sale_fee_data()
         return render_template(
             "sale_edit.html",
             sale=sale,
@@ -1718,10 +2339,14 @@ def sale_edit(sale_id: int):
             airlines=airlines,
             airline_fees_map=airline_fees_map,
             airport_fees=airport_fees_list,
+            destinations_map=destinations_map,
         )
 
     require_csrf()
     airline_id_raw = request.form.get("airline_id") or ""
+    destination_id_raw = request.form.get("destination_id") or ""
+    pnr = _sanitize(request.form.get("pnr"))
+    passenger_name = _sanitize(request.form.get("passenger_name"))
     ticket_qty_raw = request.form.get("ticket_qty") or "0"
     ticket_amount = _parse_amount(request.form.get("ticket_amount"))
     sale_group_id = _sanitize(request.form.get("sale_group_id")) or None
@@ -1729,6 +2354,7 @@ def sale_edit(sale_id: int):
 
     try:
         airline_id = int(airline_id_raw)
+        destination_id = int(destination_id_raw)
         ticket_qty = max(0, int(ticket_qty_raw))
     except ValueError:
         flash("Invalid input.")
@@ -1741,6 +2367,19 @@ def sale_edit(sale_id: int):
         airline_row = cur.fetchone()
         if not airline_row:
             flash("Airline not found.")
+            return redirect(url_for("sale_edit", sale_id=sale_id))
+
+        cur.execute(
+            """
+            SELECT id, dest_name, dest_code, active
+            FROM airline_destinations
+            WHERE id = ? AND airline_id = ?
+            """,
+            (destination_id, airline_id),
+        )
+        destination_row = cur.fetchone()
+        if not destination_row:
+            flash("Destination not found for selected airline.")
             return redirect(url_for("sale_edit", sale_id=sale_id))
 
         if payment_method not in {"CASH", "CARD"}:
@@ -1849,7 +2488,8 @@ def sale_edit(sale_id: int):
         cur.execute(
             """
             UPDATE sales
-            SET sale_group_id = ?, airline_id = ?, sold_at_utc = ?, payment_method = ?,
+            SET sale_group_id = ?, airline_id = ?, destination_id = ?, pnr = ?, passenger_name = ?,
+                sold_at_utc = ?, payment_method = ?,
                 cash_amount = ?, card_amount = ?, grand_total = ?,
                 fee_source = ?, fee_id = ?, fee_name = ?, amount = ?, currency = ?, quantity = ?, total_amount = ?
             WHERE id = ?
@@ -1857,6 +2497,9 @@ def sale_edit(sale_id: int):
             (
                 sale_group_id,
                 airline_id,
+                destination_id,
+                pnr or None,
+                passenger_name or None,
                 now,
                 payment_method,
                 cash_amount,
@@ -1923,9 +2566,20 @@ def sales_delete(sale_id: int):
         cur.execute("DELETE FROM sales WHERE id = ?", (sale_id,))
         conn.commit()
     if before_snapshot:
+        dest_name = (before_snapshot.get("destination_name") or "").strip()
+        dest_code = (before_snapshot.get("destination_code") or "").strip()
+        if dest_name and dest_code:
+            dest_label = f"{dest_name} ({dest_code})"
+        elif dest_name:
+            dest_label = dest_name
+        elif dest_code:
+            dest_label = dest_code
+        else:
+            dest_label = "-"
         details = (
             f"Deleted sale: airline={before_snapshot.get('airline_name')} "
             f"{'(' + before_snapshot.get('airline_code') + ')' if before_snapshot.get('airline_code') else ''}; "
+            f"destination={dest_label}; "
             f"items_count={before_snapshot.get('items_count')}; "
             f"total={before_snapshot.get('total_amount')}; "
             f"cash={before_snapshot.get('cash_amount')}; "
@@ -1973,10 +2627,11 @@ def reports_monthly():
 @app.get("/reports/custom", endpoint="reports_custom")
 @login_required
 def reports_custom():
-    airlines, airline_items, airport_items, sellers = _load_custom_report_filters()
-    _, airline_fees_map, airport_fees_list = _load_sale_fee_data()
+    airlines, airline_items, airport_items, sellers, destinations = _load_custom_report_filters()
+    _, airline_fees_map, airport_fees_list, destinations_map = _load_sale_fee_data()
     airlines_json = [dict(a) for a in airlines]
     airport_items_json = [dict(a) for a in airport_items]
+    destinations_json = [dict(d) for d in destinations]
 
     filters, selected = _parse_custom_report_filters(request.args)
     rows, chart_data = _build_custom_report(filters)
@@ -2016,6 +2671,7 @@ def reports_custom():
     }
 
     airlines_by_id = {str(a["id"]): a for a in airlines}
+    destinations_by_id = {str(d["id"]): d for d in destinations}
     sellers_by_id = {str(u["id"]): u for u in sellers}
     airline_fee_label_map = {}
     for airline_id, fees in airline_fees_map.items():
@@ -2069,6 +2725,20 @@ def reports_custom():
         if u:
             selected_seller_labels.append(u["fullname"] or u["nickname"])
 
+    selected_destination_labels = []
+    for did in selected["selected_destinations"]:
+        d = destinations_by_id.get(str(did))
+        if not d:
+            continue
+        name = d["dest_name"] or ""
+        code = d["dest_code"] or ""
+        if name and code:
+            selected_destination_labels.append(f"{name} ({code})")
+        elif name:
+            selected_destination_labels.append(name)
+        elif code:
+            selected_destination_labels.append(code)
+
     source_labels = []
     if "airline" in selected["selected_sources"]:
         source_labels.append("Airline Fees")
@@ -2083,6 +2753,17 @@ def reports_custom():
                 names.append(a["name"])
         if names:
             chart_title_parts.append(" + ".join(names))
+    if selected["selected_destinations"]:
+        dest_names = []
+        for d in destinations:
+            if str(d["id"]) in selected["selected_destinations"]:
+                label = d["dest_name"] or ""
+                if d["dest_code"]:
+                    label = f"{label} ({d['dest_code']})" if label else d["dest_code"]
+                if label:
+                    dest_names.append(label)
+        if dest_names:
+            chart_title_parts.append(" | ".join(dest_names))
     if "airport" in selected["selected_sources"] or "airport" in selected["selected_airlines"]:
         chart_title_parts.append("Airport Service Fees")
     chart_title = " + ".join(chart_title_parts) if chart_title_parts else "Custom Report Chart"
@@ -2096,15 +2777,21 @@ def reports_custom():
         airport_items=airport_items,
         airport_fees=airport_items_json,
         airlines_json=airlines_json,
+        destinations=destinations,
+        destinations_json=destinations_json,
+        destinations_map=destinations_map,
         sellers=sellers,
         airline_fees_map=airline_fees_map,
         airport_fees_list=airport_fees_list,
         selected_sources=selected["selected_sources"],
         selected_airlines=selected["selected_airlines"],
+        selected_destinations=selected["selected_destinations"],
+        show_destination=bool(selected["selected_destinations"]),
         selected_items=selected["selected_items"],
         selected_payments=selected["selected_payments"],
         selected_sellers=selected["selected_sellers"],
         selected_airline_labels=selected_airline_labels,
+        selected_destination_labels=selected_destination_labels,
         selected_item_labels=selected_item_labels,
         selected_seller_labels=selected_seller_labels,
         selected_payment_labels=(
@@ -2127,7 +2814,7 @@ def reports_custom():
 
 def _report_to_csv(rows):
     output = StringIO()
-    writer = csv.writer(output)
+    writer = csv.writer(output, delimiter=";")
     for r in rows:
         writer.writerow(r)
     return output.getvalue().encode("utf-8")
@@ -2135,6 +2822,10 @@ def _report_to_csv(rows):
 
 def _report_to_pdf(title: str, rows):
     buffer = BytesIO()
+    if "Vera" not in pdfmetrics.getRegisteredFontNames():
+        font_dir = os.path.join(PROJECT_ROOT, "assets", "fonts")
+        pdfmetrics.registerFont(TTFont("Vera", os.path.join(font_dir, "Vera.ttf")))
+        pdfmetrics.registerFont(TTFont("Vera-Bold", os.path.join(font_dir, "VeraBd.ttf")))
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
@@ -2147,6 +2838,7 @@ def _report_to_pdf(title: str, rows):
     title_style = ParagraphStyle(
         "ReportTitle",
         parent=styles["Title"],
+        fontName="Vera-Bold",
         fontSize=16,
         leading=20,
         spaceAfter=12,
@@ -2155,6 +2847,7 @@ def _report_to_pdf(title: str, rows):
     section_style = ParagraphStyle(
         "SectionTitle",
         parent=styles["Heading2"],
+        fontName="Vera-Bold",
         fontSize=12,
         leading=14,
         spaceBefore=6,
@@ -2162,7 +2855,12 @@ def _report_to_pdf(title: str, rows):
         textColor=colors.black,
     )
     normal_style = ParagraphStyle(
-        "NormalCell", parent=styles["BodyText"], fontSize=9, leading=11, textColor=colors.black
+        "NormalCell",
+        parent=styles["BodyText"],
+        fontName="Vera",
+        fontSize=9,
+        leading=11,
+        textColor=colors.black,
     )
 
     def make_section_header(text):
@@ -2204,10 +2902,10 @@ def _report_to_pdf(title: str, rows):
         if header:
             style.add("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e2e8f0"))
             style.add("TEXTCOLOR", (0, 0), (-1, 0), colors.black)
-            style.add("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold")
+            style.add("FONTNAME", (0, 0), (-1, 0), "Vera-Bold")
         if total_row:
             style.add("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc"))
-            style.add("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold")
+            style.add("FONTNAME", (0, 1), (-1, 1), "Vera-Bold")
             style.add("FONTSIZE", (0, 1), (-1, 1), 12)
         t.setStyle(style)
         return t
@@ -2247,7 +2945,19 @@ def _report_to_pdf(title: str, rows):
 
         header = table_rows[0]
         data_rows = table_rows[1:]
-        if header == ["Airline", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"]:
+        if header == ["Airline", "Destination", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"]:
+            col_widths = [
+                page_width * 0.16,
+                page_width * 0.18,
+                page_width * 0.12,
+                page_width * 0.22,
+                page_width * 0.06,
+                page_width * 0.10,
+                page_width * 0.08,
+                page_width * 0.08,
+            ]
+            elements.append(make_table([header] + data_rows, col_widths, header=True))
+        elif header == ["Airline", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"]:
             col_widths = [
                 page_width * 0.18,
                 page_width * 0.14,
@@ -2285,13 +2995,55 @@ def _export_report(date_filter: str, is_month: bool, fmt: str):
     data = _build_report_payload(date_filter, is_month)
     rows = []
     label = "Monthly" if is_month else "Daily"
+    report_type = "monthly" if is_month else "daily"
+    date_key = date_filter
+    _log_report_snapshot(report_type, date_key, session.get("user_id"))
+    try:
+        user_name = session.get("fullname") or session.get("nickname") or "User"
+        if is_month:
+            send_notification(
+                "monthly_report_created",
+                {"UserName": user_name, "ReportMonth": _format_month_label(date_key)},
+            )
+        else:
+            send_notification(
+                "daily_report_created",
+                {"UserName": user_name, "ReportDate": date_key},
+            )
+    except Exception:
+        pass
+
+    def _destination_label(row):
+        keys = row.keys() if hasattr(row, "keys") else []
+        name = (row["destination_name"] or "").strip() if "destination_name" in keys else ""
+        code = (row["destination_code"] or "").strip() if "destination_code" in keys else ""
+        if name and code:
+            return f"{name} ({code})"
+        if name:
+            return name
+        if code:
+            return code
+        return "-"
+
     rows.append([f"{label} Report", date_filter])
     rows.append([])
     rows.append(["Airline Fees"])
-    rows.append(["Airline", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"])
+    rows.append(["Airline", "Destination", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"])
     for r in data["airline_items"]:
         airline = f"{r['name']}{' (' + r['code'] + ')' if r['code'] else ''}"
-        rows.append([airline, r["fee_key"], r["fee_name"], r["qty"], r["total"], r["cash_total"], r["card_total"]])
+        destination = _destination_label(r)
+        rows.append(
+            [
+                airline,
+                destination,
+                r["fee_key"],
+                r["fee_name"],
+                r["qty"],
+                r["total"],
+                r["cash_total"],
+                r["card_total"],
+            ]
+        )
     rows.append([])
     rows.append(["Airline Fees Totals by Airline"])
     rows.append(["Airline", "Total", "Cash", "Card"])
@@ -2303,10 +3055,22 @@ def _export_report(date_filter: str, is_month: bool, fmt: str):
     rows.append([data["airline_all"]["total"], data["airline_all"]["cash_total"], data["airline_all"]["card_total"]])
     rows.append([])
     rows.append(["Airport Service Fees"])
-    rows.append(["Airline", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"])
+    rows.append(["Airline", "Destination", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"])
     for r in data["airport_items"]:
         airline = f"{r['name']}{' (' + r['code'] + ')' if r['code'] else ''}"
-        rows.append([airline, r["fee_key"], r["fee_name"], r["qty"], r["total"], r["cash_total"], r["card_total"]])
+        destination = _destination_label(r)
+        rows.append(
+            [
+                airline,
+                destination,
+                r["fee_key"],
+                r["fee_name"],
+                r["qty"],
+                r["total"],
+                r["cash_total"],
+                r["card_total"],
+            ]
+        )
     rows.append([])
     rows.append(["Airport Fees Totals by Airline"])
     rows.append(["Airline", "Total", "Cash", "Card"])
@@ -2391,16 +3155,39 @@ def reports_custom_export():
     }
     _, chart_data = _build_custom_report(filters)
 
+    def _destination_label(row):
+        keys = row.keys() if hasattr(row, "keys") else []
+        name = (row["destination_name"] or "").strip() if "destination_name" in keys else ""
+        code = (row["destination_code"] or "").strip() if "destination_code" in keys else ""
+        if name and code:
+            return f"{name} ({code})"
+        if name:
+            return name
+        if code:
+            return code
+        return "-"
+
+    # Structured rows used for PDF export
     rows = []
     rows.append([f"Custom Report", f"{filters['date_from']} to {filters['date_to']}"])
     rows.append([])
     if filters["include_airline"]:
         rows.append(["Airline Fees"])
-        rows.append(["Airline", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"])
+        rows.append(["Airline", "Destination", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"])
         for r in airline_items_summary:
             airline = f"{r['name']}{' (' + r['code'] + ')' if r['code'] else ''}"
+            destination = _destination_label(r)
             rows.append(
-                [airline, r["fee_key"], r["fee_name"], r["qty"], r["total"], r["cash_total"], r["card_total"]]
+                [
+                    airline,
+                    destination,
+                    r["fee_key"],
+                    r["fee_name"],
+                    r["qty"],
+                    r["total"],
+                    r["cash_total"],
+                    r["card_total"],
+                ]
             )
         rows.append([])
         rows.append(["Airline Fees Totals by Airline"])
@@ -2415,11 +3202,21 @@ def reports_custom_export():
 
     if filters["include_airport"]:
         rows.append(["Airport Service Fees"])
-        rows.append(["Airline", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"])
+        rows.append(["Airline", "Destination", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"])
         for r in airport_items_summary:
             airline = f"{r['name']}{' (' + r['code'] + ')' if r['code'] else ''}"
+            destination = _destination_label(r)
             rows.append(
-                [airline, r["fee_key"], r["fee_name"], r["qty"], r["total"], r["cash_total"], r["card_total"]]
+                [
+                    airline,
+                    destination,
+                    r["fee_key"],
+                    r["fee_name"],
+                    r["qty"],
+                    r["total"],
+                    r["cash_total"],
+                    r["card_total"],
+                ]
             )
         rows.append([])
         rows.append(["Airport Fees Totals by Airline"])
@@ -2437,7 +3234,46 @@ def reports_custom_export():
     rows.append([combined["total"], combined["cash_total"], combined["card_total"]])
 
     if fmt.lower() == "csv":
-        content = _report_to_csv(rows)
+        flat_rows = []
+        flat_rows.append(
+            ["Section", "Airline", "Destination", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"]
+        )
+        if filters["include_airline"]:
+            for r in airline_items_summary:
+                airline = f"{r['name']}{' (' + r['code'] + ')' if r['code'] else ''}"
+                destination = _destination_label(r) if filters.get("destination_ids") else ""
+                flat_rows.append(
+                    [
+                        "Airline Fees",
+                        airline,
+                        destination,
+                        r["fee_key"],
+                        r["fee_name"],
+                        r["qty"],
+                        r["total"],
+                        r["cash_total"],
+                        r["card_total"],
+                    ]
+                )
+        if filters["include_airport"]:
+            for r in airport_items_summary:
+                airline = f"{r['name']}{' (' + r['code'] + ')' if r['code'] else ''}"
+                destination = _destination_label(r) if filters.get("destination_ids") else ""
+                flat_rows.append(
+                    [
+                        "Airport Fees",
+                        airline,
+                        destination,
+                        r["fee_key"],
+                        r["fee_name"],
+                        r["qty"],
+                        r["total"],
+                        r["cash_total"],
+                        r["card_total"],
+                    ]
+                )
+
+        content = _report_to_csv(flat_rows)
         resp = make_response(content)
         resp.headers["Content-Type"] = "text/csv"
         resp.headers["Content-Disposition"] = (
@@ -2461,19 +3297,205 @@ def reports_custom_export():
 @app.get("/variable_rewards", endpoint="variable_rewards")
 @admin_required
 def variable_rewards():
-    return render_template("variable_rewards.html")
+    month_raw = _sanitize(request.args.get("month"))
+    year_raw = _sanitize(request.args.get("year"))
+    try:
+        selected_month = int(month_raw) if month_raw else datetime.now(timezone.utc).month
+    except ValueError:
+        selected_month = datetime.now(timezone.utc).month
+    selected_month = min(12, max(1, selected_month))
+    try:
+        year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
+    except ValueError:
+        year = datetime.now(timezone.utc).year
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, fullname, nickname, role, active "
+            "FROM users ORDER BY fullname COLLATE NOCASE ASC"
+        )
+        users_list = cur.fetchall()
+        monthly_total = _compute_monthly_airport_total(year, selected_month)
+    percent_key = f"variable_rewards_percent_{year}_{selected_month:02d}"
+    percent_raw = get_app_state(percent_key) or "100"
+    try:
+        percent_value = float(percent_raw)
+    except ValueError:
+        percent_value = 100.0
+    percent_value = round(min(100.0, max(0.0, percent_value)))
+    manual_amounts = {}
+    for u in users_list:
+        key = f"variable_rewards_manual_{year}_{selected_month:02d}_{u['id']}"
+        raw = get_app_state(key)
+        if raw is None:
+            continue
+        try:
+            manual_amounts[str(u["id"])] = float(raw)
+        except ValueError:
+            continue
+    return render_template(
+        "variable_rewards.html",
+        users=users_list,
+        monthly_total=monthly_total,
+        selected_month=selected_month,
+        selected_year=year,
+        percent_value=percent_value,
+        manual_amounts=manual_amounts,
+        year_options=[year - 2, year - 1, year, year + 1],
+    )
 
 
 @app.get("/account_settings", endpoint="account_settings")
 @admin_required
 def account_settings():
-    return render_template("account_settings.html")
+    smtp = {
+        "host": get_app_state("smtp_host") or "",
+        "port": get_app_state("smtp_port") or "587",
+        "user": get_app_state("smtp_user") or "",
+        "sender": get_app_state("smtp_sender") or "",
+        "tls": get_app_state("smtp_tls") or "1",
+    }
+    return render_template("account_settings.html", smtp=smtp)
 
 
-@app.get("/notifications", endpoint="notifications")
+@app.post("/account_settings/smtp", endpoint="account_settings_smtp")
+@admin_required
+def account_settings_smtp():
+    require_csrf()
+    host = _sanitize(request.form.get("smtp_host"))
+    port = _sanitize(request.form.get("smtp_port")) or "587"
+    user = _sanitize(request.form.get("smtp_user"))
+    password = _sanitize(request.form.get("smtp_password"))
+    sender = _sanitize(request.form.get("smtp_sender"))
+    tls = "1" if request.form.get("smtp_tls") == "on" else "0"
+
+    set_app_state("smtp_host", host)
+    set_app_state("smtp_port", port)
+    set_app_state("smtp_user", user)
+    if password:
+        set_app_state("smtp_password", password)
+    set_app_state("smtp_sender", sender)
+    set_app_state("smtp_tls", tls)
+
+    flash("SMTP settings saved.")
+    return redirect(url_for("account_settings"))
+
+
+@app.route("/notifications", methods=["GET", "POST"], endpoint="notifications")
 @admin_required
 def notifications():
-    return render_template("notifications.html")
+    if request.method == "POST":
+        require_csrf()
+        emails = []
+        seen = set()
+        for i in range(1, 11):
+            raw = _sanitize(request.form.get(f"email_{i}"))
+            if not raw:
+                continue
+            email = raw.lower()
+            if not _is_valid_email(email):
+                with get_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT id, name, slug, subject, body, enabled "
+                        "FROM notification_templates ORDER BY id ASC"
+                    )
+                    templates = cur.fetchall()
+                flash(f"Invalid email: {raw}")
+                return render_template("notifications.html", emails=request.form, templates=templates)
+            if email in seen:
+                continue
+            seen.add(email)
+            emails.append(email)
+
+        now = datetime.now(timezone.utc).isoformat()
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM notification_emails")
+            for email in emails:
+                cur.execute(
+                    "INSERT INTO notification_emails (email, created_at_utc) VALUES (?, ?)",
+                    (email, now),
+                )
+            conn.commit()
+        flash("Notifications saved.")
+        return redirect(url_for("notifications"))
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT email FROM notification_emails ORDER BY id ASC")
+        rows = cur.fetchall()
+        cur.execute(
+            "SELECT id, name, slug, subject, body, enabled FROM notification_templates ORDER BY id ASC"
+        )
+        templates = cur.fetchall()
+    emails = [r["email"] for r in rows]
+    while len(emails) < 10:
+        emails.append("")
+    return render_template("notifications.html", emails=emails, templates=templates)
+
+
+@app.post("/notifications/templates", endpoint="notification_template_create")
+@admin_required
+def notification_template_create():
+    require_csrf()
+    name = _sanitize(request.form.get("name"))
+    subject = _sanitize(request.form.get("subject"))
+    body = _sanitize(request.form.get("body"))
+    enabled = 1 if request.form.get("enabled") == "on" else 0
+    if not (name and subject and body):
+        flash("Please fill name, subject and body.")
+        return redirect(url_for("notifications"))
+
+    slug_base = _slugify(name)
+    slug = slug_base
+    with get_connection() as conn:
+        cur = conn.cursor()
+        idx = 2
+        while True:
+            cur.execute("SELECT 1 FROM notification_templates WHERE slug = ?", (slug,))
+            if not cur.fetchone():
+                break
+            slug = f"{slug_base}_{idx}"
+            idx += 1
+        now = _utc_now_iso()
+        cur.execute(
+            """
+            INSERT INTO notification_templates (name, slug, subject, body, enabled, created_at_utc, updated_at_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (name, slug, subject, body, enabled, now, now),
+        )
+        conn.commit()
+    flash("Notification template created.")
+    return redirect(url_for("notifications"))
+
+
+@app.post("/notifications/templates/<int:template_id>", endpoint="notification_template_update")
+@admin_required
+def notification_template_update(template_id: int):
+    require_csrf()
+    name = _sanitize(request.form.get("name"))
+    subject = _sanitize(request.form.get("subject"))
+    body = _sanitize(request.form.get("body"))
+    enabled = 1 if request.form.get("enabled") == "on" else 0
+    if not (name and subject and body):
+        flash("Please fill name, subject and body.")
+        return redirect(url_for("notifications"))
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE notification_templates
+            SET name = ?, subject = ?, body = ?, enabled = ?, updated_at_utc = ?
+            WHERE id = ?
+            """,
+            (name, subject, body, enabled, _utc_now_iso(), template_id),
+        )
+        conn.commit()
+    flash("Notification template updated.")
+    return redirect(url_for("notifications"))
 
 
 # -----------------------------------------------------------------------------
@@ -2594,20 +3616,28 @@ def delete_user(user_id: int):
         flash("You cannot delete the currently logged-in user.")
         return redirect(url_for("users"))
 
+    deleted_name = None
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT role FROM users WHERE id = ?", (user_id,))
+        cur.execute("SELECT role, fullname FROM users WHERE id = ?", (user_id,))
         row = cur.fetchone()
         if not row:
             flash("User not found.")
             return redirect(url_for("users"))
 
+        deleted_name = row["fullname"]
         if row["role"] == "Admin" and _count_admins() <= 1:
             flash("You cannot delete the last Admin. Reassign Admin role first.")
             return redirect(url_for("reassign_admin"))
 
         cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
+
+    if deleted_name:
+        try:
+            send_notification("user_deleted", {"UserName": deleted_name})
+        except Exception:
+            pass
 
     flash("User deleted.")
     return redirect(url_for("users"))
@@ -2971,6 +4001,455 @@ def airport_service_fee_delete(fee_id: int):
     flash("Fee deleted.")
     return redirect(url_for("airport_service_fees"))
 
+@app.post("/variable_rewards/<int:user_id>/active", endpoint="variable_rewards_active")
+@admin_required
+def variable_rewards_active(user_id: int):
+    require_csrf()
+    active = _parse_bool_checkbox(request.form.get("active"))
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+        if not cur.fetchone():
+            flash("User not found.")
+            return redirect(url_for("variable_rewards"))
+        cur.execute("UPDATE users SET active = ? WHERE id = ?", (active, user_id))
+        conn.commit()
+    flash("Active status updated.")
+    return redirect(url_for("variable_rewards"))
+
+
+@app.post("/variable_rewards/percent", endpoint="variable_rewards_percent")
+@admin_required
+def variable_rewards_percent():
+    require_csrf()
+    percent_value = _parse_amount(request.form.get("percent_value"))
+    percent_value = round(min(100.0, max(0.0, percent_value)))
+    month_raw = _sanitize(request.form.get("month"))
+    year_raw = _sanitize(request.form.get("year"))
+    try:
+        month = int(month_raw) if month_raw else datetime.now(timezone.utc).month
+    except ValueError:
+        month = datetime.now(timezone.utc).month
+    month = min(12, max(1, month))
+    try:
+        year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
+    except ValueError:
+        year = datetime.now(timezone.utc).year
+    percent_key = f"variable_rewards_percent_{year}_{month:02d}"
+    set_app_state(percent_key, str(int(percent_value)))
+    if month_raw:
+        return redirect(url_for("variable_rewards", month=month, year=year))
+    return redirect(url_for("variable_rewards", year=year))
+
+
+@app.post("/variable_rewards/manual/<int:user_id>", endpoint="variable_rewards_manual")
+@admin_required
+def variable_rewards_manual(user_id: int):
+    require_csrf()
+    amount = _parse_amount(request.form.get("manual_amount"))
+    amount = max(0.0, amount)
+    month_raw = _sanitize(request.form.get("month"))
+    year_raw = _sanitize(request.form.get("year"))
+    try:
+        month = int(month_raw) if month_raw else datetime.now(timezone.utc).month
+    except ValueError:
+        month = datetime.now(timezone.utc).month
+    month = min(12, max(1, month))
+    try:
+        year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
+    except ValueError:
+        year = datetime.now(timezone.utc).year
+    key = f"variable_rewards_manual_{year}_{month:02d}_{user_id}"
+    set_app_state(key, str(amount))
+    flash("Manual amount saved.")
+    return redirect(url_for("variable_rewards", month=month, year=year))
+
+
+@app.post("/variable_rewards/save", endpoint="variable_rewards_save")
+@admin_required
+def variable_rewards_save():
+    require_csrf()
+    month_raw = _sanitize(request.form.get("month"))
+    year_raw = _sanitize(request.form.get("year"))
+    try:
+        month = int(month_raw) if month_raw else datetime.now(timezone.utc).month
+    except ValueError:
+        month = datetime.now(timezone.utc).month
+    month = min(12, max(1, month))
+    try:
+        year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
+    except ValueError:
+        year = datetime.now(timezone.utc).year
+
+    monthly_total, percent_value, reduced_total, computed_users = _compute_variable_rewards_distribution(
+        year, month
+    )
+    _save_variable_rewards_snapshot(
+        year, month, monthly_total, percent_value, reduced_total, computed_users
+    )
+
+    flash("Snapshot saved.")
+    return redirect(url_for("variable_rewards", month=month, year=year))
+
+
+@app.get("/variable_rewards/summary", endpoint="variable_rewards_summary")
+@admin_required
+def variable_rewards_summary():
+    year_raw = _sanitize(request.args.get("year"))
+    month_from_raw = _sanitize(request.args.get("month_from"))
+    month_to_raw = _sanitize(request.args.get("month_to"))
+    try:
+        year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
+    except ValueError:
+        year = datetime.now(timezone.utc).year
+    try:
+        month_from = int(month_from_raw) if month_from_raw else 1
+    except ValueError:
+        month_from = 1
+    try:
+        month_to = int(month_to_raw) if month_to_raw else datetime.now(timezone.utc).month
+    except ValueError:
+        month_to = datetime.now(timezone.utc).month
+    month_from = min(12, max(1, month_from))
+    month_to = min(12, max(1, month_to))
+    if month_to < month_from:
+        month_from, month_to = month_to, month_from
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT u.id, u.fullname, u.nickname, u.role,
+                   COALESCE(SUM(s.computed_amount), 0) AS computed_amount
+            FROM users u
+            LEFT JOIN variable_rewards_snapshots s
+              ON s.user_id = u.id
+             AND s.year = ?
+             AND s.scope = 'monthly'
+             AND s.month BETWEEN ? AND ?
+            GROUP BY u.id
+            ORDER BY u.fullname COLLATE NOCASE ASC
+            """,
+            (year, month_from, month_to),
+        )
+        rows = cur.fetchall()
+        cur.execute(
+            """
+            SELECT SUM(month_total) AS total
+            FROM (
+                SELECT month, MAX(reduced_total) AS month_total
+                FROM variable_rewards_snapshots
+                WHERE year = ? AND scope = 'monthly' AND month BETWEEN ? AND ?
+                GROUP BY month
+            ) t
+            """,
+            (year, month_from, month_to),
+        )
+        total_row = cur.fetchone()
+        total_reduced = float(total_row["total"] or 0)
+    return render_template(
+        "variable_rewards_summary.html",
+        year=year,
+        month_from=month_from,
+        month_to=month_to,
+        rows=rows,
+        total_reduced=total_reduced,
+    )
+
+
+@app.get("/variable_rewards/summary/pdf", endpoint="variable_rewards_summary_pdf")
+@admin_required
+def variable_rewards_summary_pdf():
+    year_raw = _sanitize(request.args.get("year"))
+    month_from_raw = _sanitize(request.args.get("month_from"))
+    month_to_raw = _sanitize(request.args.get("month_to"))
+    try:
+        year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
+    except ValueError:
+        year = datetime.now(timezone.utc).year
+    try:
+        month_from = int(month_from_raw) if month_from_raw else 1
+    except ValueError:
+        month_from = 1
+    try:
+        month_to = int(month_to_raw) if month_to_raw else datetime.now(timezone.utc).month
+    except ValueError:
+        month_to = datetime.now(timezone.utc).month
+    month_from = min(12, max(1, month_from))
+    month_to = min(12, max(1, month_to))
+    if month_to < month_from:
+        month_from, month_to = month_to, month_from
+    month_names = [
+        "", "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ]
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT u.fullname, u.nickname, u.role,
+                   COALESCE(SUM(s.computed_amount), 0) AS computed_amount
+            FROM users u
+            LEFT JOIN variable_rewards_snapshots s
+              ON s.user_id = u.id
+             AND s.year = ?
+             AND s.scope = 'monthly'
+             AND s.month BETWEEN ? AND ?
+            GROUP BY u.id
+            ORDER BY u.fullname COLLATE NOCASE ASC
+            """,
+            (year, month_from, month_to),
+        )
+        rows_db = cur.fetchall()
+        cur.execute(
+            """
+            SELECT SUM(month_total) AS total
+            FROM (
+                SELECT month, MAX(reduced_total) AS month_total
+                FROM variable_rewards_snapshots
+                WHERE year = ? AND scope = 'monthly' AND month BETWEEN ? AND ?
+                GROUP BY month
+            ) t
+            """,
+            (year, month_from, month_to),
+        )
+        total_row = cur.fetchone()
+        total_reduced = float(total_row["total"] or 0)
+
+    rows = []
+    title = "Yearly Rewards Summary"
+    report_range = f"{month_names[month_from]}-{month_names[month_to]} {year}"
+    rows.append([f"{title} ({report_range})"])
+    rows.append(["#", "Full name", "Nickname", "Role", "Total (Range)"])
+    for idx, r in enumerate(rows_db, start=1):
+        rows.append(
+            [
+                idx,
+                r["fullname"],
+                r["nickname"],
+                r["role"],
+                f"{float(r['computed_amount'] or 0):.2f} EUR",
+            ]
+        )
+    rows.append([])
+    rows.append(["Total reduced reward paid (Range)"])
+    rows.append(["Amount"])
+    rows.append([f"{total_reduced:.2f} EUR"])
+
+    report_title = f"{title} {report_range}"
+    content = _report_to_pdf(report_title, rows)
+    resp = make_response(content)
+    resp.headers["Content-Type"] = "application/pdf"
+    resp.headers["Content-Disposition"] = (
+        f"attachment; filename=[REWARDS SUMMARY] {year}-{month_from:02d}-{month_to:02d}.pdf"
+    )
+    return resp
+
+
+@app.get("/variable_rewards/summary/print/<int:user_id>", endpoint="variable_rewards_summary_print_user")
+@admin_required
+def variable_rewards_summary_print_user(user_id: int):
+    year_raw = _sanitize(request.args.get("year"))
+    month_from_raw = _sanitize(request.args.get("month_from"))
+    month_to_raw = _sanitize(request.args.get("month_to"))
+    try:
+        year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
+    except ValueError:
+        year = datetime.now(timezone.utc).year
+    try:
+        month_from = int(month_from_raw) if month_from_raw else 1
+    except ValueError:
+        month_from = 1
+    try:
+        month_to = int(month_to_raw) if month_to_raw else datetime.now(timezone.utc).month
+    except ValueError:
+        month_to = datetime.now(timezone.utc).month
+    month_from = min(12, max(1, month_from))
+    month_to = min(12, max(1, month_to))
+    if month_to < month_from:
+        month_from, month_to = month_to, month_from
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT fullname, nickname FROM users WHERE id = ?", (user_id,))
+        user = cur.fetchone()
+        if not user:
+            flash("User not found.")
+            return redirect(url_for("variable_rewards_summary", year=year, month_from=month_from, month_to=month_to))
+
+        cur.execute(
+            """
+            SELECT month, computed_amount
+            FROM variable_rewards_snapshots
+            WHERE year = ? AND scope = 'monthly' AND user_id = ? AND month BETWEEN ? AND ?
+            ORDER BY month ASC
+            """,
+            (year, user_id, month_from, month_to),
+        )
+        month_rows = {int(r["month"]): float(r["computed_amount"] or 0) for r in cur.fetchall()}
+
+    month_names = [
+        "", "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ]
+    rows = []
+    title = f"Yearly Summary - {user['fullname'] or user['nickname']}"
+    period = f"{month_names[month_from]}-{month_names[month_to]} {year}"
+    rows.append(["Monthly breakdown"])
+    rows.append(["Month", "Amount", "Total"])
+    total = 0.0
+    for m in range(month_from, month_to + 1):
+        amount = float(month_rows.get(m, 0.0))
+        total += amount
+        rows.append(
+            [
+                f"{month_names[m]} {year}",
+                f"{amount:.2f} EUR",
+                f"{total:.2f} EUR",
+            ]
+        )
+    rows.append([])
+    rows.append(["Total"])
+    rows.append([f"{total:.2f} EUR"])
+
+    report_title = f"{title} ({period})"
+    content = _report_to_pdf(report_title, rows)
+    resp = make_response(content)
+    resp.headers["Content-Type"] = "application/pdf"
+    resp.headers["Content-Disposition"] = (
+        f"attachment; filename=[SUMMARY] {user['fullname'] or user['nickname']} {year}-{month_from:02d}-{month_to:02d}.pdf"
+    )
+    return resp
+
+
+@app.get("/variable_rewards/print_all", endpoint="variable_rewards_print_all")
+@admin_required
+def variable_rewards_print_all():
+    month_raw = _sanitize(request.args.get("month"))
+    year_raw = _sanitize(request.args.get("year"))
+    try:
+        month = int(month_raw) if month_raw else datetime.now(timezone.utc).month
+    except ValueError:
+        month = datetime.now(timezone.utc).month
+    month = min(12, max(1, month))
+    try:
+        year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
+    except ValueError:
+        year = datetime.now(timezone.utc).year
+
+    monthly_total, percent_value, reduced_total, computed_users = _compute_variable_rewards_distribution(
+        year, month
+    )
+    _save_variable_rewards_snapshot(
+        year, month, monthly_total, percent_value, reduced_total, computed_users
+    )
+
+    month_names = [
+        "", "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ]
+    rows = []
+    title = "Variable Rewards"
+    period = f"{month_names[month]} {year}"
+    rows.append([f"{title} ({period})"])
+    rows.append(["#", "Full name", "Nickname", "Role", "Total"])
+    for idx, u in enumerate(computed_users, start=1):
+        rows.append(
+            [
+                idx,
+                u["fullname"],
+                u["nickname"],
+                u["role"],
+                f"{float(u['computed_amount'] or 0):.2f} EUR",
+            ]
+        )
+    rows.append([])
+    rows.append(["Total reduced reward paid"])
+    rows.append(["Amount"])
+    rows.append([f"{reduced_total:.2f} EUR"])
+
+    report_title = f"{title} {period}"
+    content = _report_to_pdf(report_title, rows)
+    resp = make_response(content)
+    resp.headers["Content-Type"] = "application/pdf"
+    resp.headers["Content-Disposition"] = (
+        f"attachment; filename=[VARIABLE REWARDS] {year}-{month:02d}.pdf"
+    )
+    return resp
+
+
+@app.get("/variable_rewards/print/<int:user_id>", endpoint="variable_rewards_print")
+@admin_required
+def variable_rewards_print(user_id: int):
+    month_raw = _sanitize(request.args.get("month"))
+    year_raw = _sanitize(request.args.get("year"))
+    try:
+        month = int(month_raw) if month_raw else datetime.now(timezone.utc).month
+    except ValueError:
+        month = datetime.now(timezone.utc).month
+    month = min(12, max(1, month))
+    try:
+        year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
+    except ValueError:
+        year = datetime.now(timezone.utc).year
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT fullname, nickname FROM users WHERE id = ?", (user_id,))
+        user = cur.fetchone()
+        if not user:
+            flash("User not found.")
+            return redirect(url_for("variable_rewards", month=month, year=year))
+
+        cur.execute(
+            """
+            SELECT month, computed_amount
+            FROM variable_rewards_snapshots
+            WHERE year = ? AND scope = 'monthly' AND user_id = ? AND month BETWEEN 1 AND ?
+            ORDER BY month ASC
+            """,
+            (year, user_id, month),
+        )
+        month_rows = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT computed_amount
+            FROM variable_rewards_snapshots
+            WHERE year = ? AND scope = 'yearly' AND user_id = ? AND month = ?
+            """,
+            (year, user_id, month),
+        )
+        ytd_row = cur.fetchone()
+
+    month_names = [
+        "", "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ]
+    rows = []
+    title = f"Variable Rewards - {user['fullname'] or user['nickname']}"
+    period_label = f"{month_names[month]} {year}"
+    rows.append([title, f"Up to {period_label}"])
+    rows.append([])
+    rows.append(["Month", "Amount"])
+    for r in month_rows:
+        m = int(r["month"] or 0)
+        label = f"{month_names[m]} {year}" if 1 <= m <= 12 else str(m)
+        rows.append([label, f"{float(r['computed_amount'] or 0):.2f}"])
+    rows.append([])
+    rows.append(["Year-to-date total"])
+    if ytd_row and ytd_row["computed_amount"] is not None:
+        ytd_total = float(ytd_row["computed_amount"] or 0)
+    else:
+        ytd_total = sum(float(r["computed_amount"] or 0) for r in month_rows)
+    rows.append([f"{ytd_total:.2f}"])
+
+    content = _report_to_pdf(f"{title} ({period_label})", rows)
+    resp = make_response(content)
+    resp.headers["Content-Type"] = "application/pdf"
+    resp.headers["Content-Disposition"] = (
+        f"attachment; filename=[REWARDS] {user['fullname'] or user['nickname']} {year}-{month:02d}.pdf"
+    )
+    return resp
 @app.route("/airlines/<int:airline_id>/edit", methods=["GET", "POST"], endpoint="airlines_edit")
 @admin_required
 def airlines_edit(airline_id: int):
@@ -3177,6 +4656,169 @@ def airline_fee_delete(airline_id: int, fee_id: int):
         conn.commit()
     flash("Fee deleted.")
     return redirect(url_for("airline_fees", airline_id=airline_id))
+
+
+@app.get("/airlines/<int:airline_id>/destinations", endpoint="airline_destinations")
+@admin_required
+def airline_destinations(airline_id: int):
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, code FROM airlines WHERE id = ?", (airline_id,))
+        airline = cur.fetchone()
+        if not airline:
+            flash("Airline not found.")
+            return redirect(url_for("airlines"))
+        cur.execute(
+            """
+            SELECT id, dest_code, dest_name, active, created_at_utc, updated_at_utc
+            FROM airline_destinations
+            WHERE airline_id = ?
+            ORDER BY dest_name COLLATE NOCASE ASC
+            """,
+            (airline_id,),
+        )
+        destinations = cur.fetchall()
+    return render_template("airline_destinations.html", airline=airline, destinations=destinations)
+
+
+@app.post("/airlines/<int:airline_id>/destinations/add", endpoint="airline_destinations_add")
+@admin_required
+def airline_destinations_add(airline_id: int):
+    require_csrf()
+    dest_code = _sanitize(request.form.get("dest_code")).upper()
+    dest_name = _sanitize(request.form.get("dest_name"))
+    active = _parse_bool_checkbox(request.form.get("active"))
+    now = _utc_now_iso()
+
+    if not dest_name:
+        flash("Destination name is required.")
+        return redirect(url_for("airline_destinations", airline_id=airline_id))
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM airlines WHERE id = ?", (airline_id,))
+        if not cur.fetchone():
+            flash("Airline not found.")
+            return redirect(url_for("airlines"))
+
+        if dest_code:
+            cur.execute(
+                "SELECT 1 FROM airline_destinations WHERE airline_id = ? AND dest_code = ?",
+                (airline_id, dest_code),
+            )
+            if cur.fetchone():
+                flash("Destination code must be unique for this airline.")
+                return redirect(url_for("airline_destinations", airline_id=airline_id))
+
+        cur.execute(
+            """
+            INSERT INTO airline_destinations
+                (airline_id, dest_code, dest_name, active, created_at_utc, updated_at_utc)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (airline_id, dest_code or None, dest_name, active, now, now),
+        )
+        conn.commit()
+
+    flash("Destination added.")
+    return redirect(url_for("airline_destinations", airline_id=airline_id))
+
+
+@app.route(
+    "/airlines/<int:airline_id>/destinations/<int:destination_id>/edit",
+    methods=["GET", "POST"],
+    endpoint="airline_destination_edit",
+)
+@admin_required
+def airline_destination_edit(airline_id: int, destination_id: int):
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, dest_code, dest_name, active
+            FROM airline_destinations
+            WHERE id = ? AND airline_id = ?
+            """,
+            (destination_id, airline_id),
+        )
+        destination = cur.fetchone()
+    if not destination:
+        flash("Destination not found.")
+        return redirect(url_for("airline_destinations", airline_id=airline_id))
+
+    if request.method == "GET":
+        return render_template(
+            "airline_destination_edit.html",
+            airline_id=airline_id,
+            destination=destination,
+        )
+
+    require_csrf()
+    dest_code = _sanitize(request.form.get("dest_code")).upper()
+    dest_name = _sanitize(request.form.get("dest_name"))
+    active = _parse_bool_checkbox(request.form.get("active"))
+    now = _utc_now_iso()
+
+    if not dest_name:
+        flash("Destination name is required.")
+        return redirect(
+            url_for("airline_destination_edit", airline_id=airline_id, destination_id=destination_id)
+        )
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        if dest_code:
+            cur.execute(
+                """
+                SELECT 1 FROM airline_destinations
+                WHERE airline_id = ? AND dest_code = ? AND id != ?
+                """,
+                (airline_id, dest_code, destination_id),
+            )
+            if cur.fetchone():
+                flash("Destination code must be unique for this airline.")
+                return redirect(
+                    url_for(
+                        "airline_destination_edit",
+                        airline_id=airline_id,
+                        destination_id=destination_id,
+                    )
+                )
+
+        cur.execute(
+            """
+            UPDATE airline_destinations
+            SET dest_code = ?, dest_name = ?, active = ?, updated_at_utc = ?
+            WHERE id = ? AND airline_id = ?
+            """,
+            (dest_code or None, dest_name, active, now, destination_id, airline_id),
+        )
+        conn.commit()
+
+    flash("Destination updated.")
+    return redirect(url_for("airline_destinations", airline_id=airline_id))
+
+
+@app.post(
+    "/airlines/<int:airline_id>/destinations/<int:destination_id>/delete",
+    endpoint="airline_destination_delete",
+)
+@admin_required
+def airline_destination_delete(airline_id: int, destination_id: int):
+    require_csrf()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "DELETE FROM airline_destinations WHERE id = ? AND airline_id = ?",
+                (destination_id, airline_id),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            flash("Destination is used in sales and cannot be deleted.")
+            return redirect(url_for("airline_destinations", airline_id=airline_id))
+    flash("Destination deleted.")
+    return redirect(url_for("airline_destinations", airline_id=airline_id))
 
 
 if __name__ == "__main__":

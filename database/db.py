@@ -211,6 +211,8 @@ def _migrate_users_table(conn: sqlite3.Connection) -> None:
     if "approved" not in cols:
         cur.execute("ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 1")
         added_approved = True
+    if "active" not in cols:
+        cur.execute("ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
     if "approved_by" not in cols:
         cur.execute("ALTER TABLE users ADD COLUMN approved_by INTEGER")
     if "approved_at_utc" not in cols:
@@ -296,6 +298,167 @@ def _migrate_sales_logs_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_variable_rewards_snapshots_table(conn: sqlite3.Connection) -> None:
+    cols = _get_columns(conn, "variable_rewards_snapshots")
+    cur = conn.cursor()
+    now = _utc_now_iso()
+
+    if "year" not in cols:
+        cur.execute("ALTER TABLE variable_rewards_snapshots ADD COLUMN year INTEGER")
+    if "month" not in cols:
+        cur.execute("ALTER TABLE variable_rewards_snapshots ADD COLUMN month INTEGER")
+    if "scope" not in cols:
+        cur.execute("ALTER TABLE variable_rewards_snapshots ADD COLUMN scope TEXT")
+    if "user_id" not in cols:
+        cur.execute("ALTER TABLE variable_rewards_snapshots ADD COLUMN user_id INTEGER")
+    if "total_monthly" not in cols:
+        cur.execute("ALTER TABLE variable_rewards_snapshots ADD COLUMN total_monthly REAL NOT NULL DEFAULT 0")
+    if "percent" not in cols:
+        cur.execute("ALTER TABLE variable_rewards_snapshots ADD COLUMN percent REAL NOT NULL DEFAULT 0")
+    if "reduced_total" not in cols:
+        cur.execute("ALTER TABLE variable_rewards_snapshots ADD COLUMN reduced_total REAL NOT NULL DEFAULT 0")
+    if "manual_amount" not in cols:
+        cur.execute("ALTER TABLE variable_rewards_snapshots ADD COLUMN manual_amount REAL NOT NULL DEFAULT 0")
+    if "computed_amount" not in cols:
+        cur.execute("ALTER TABLE variable_rewards_snapshots ADD COLUMN computed_amount REAL NOT NULL DEFAULT 0")
+    if "created_at_utc" not in cols:
+        cur.execute("ALTER TABLE variable_rewards_snapshots ADD COLUMN created_at_utc TEXT")
+
+    conn.commit()
+
+    cur.execute(
+        "UPDATE variable_rewards_snapshots SET created_at_utc = ? "
+        "WHERE created_at_utc IS NULL OR created_at_utc = ''",
+        (now,),
+    )
+    conn.commit()
+
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_var_rewards_year_month "
+        "ON variable_rewards_snapshots(year, month, scope)"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_var_rewards_user "
+        "ON variable_rewards_snapshots(user_id)"
+    )
+    try:
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_var_rewards_scope "
+            "ON variable_rewards_snapshots(year, month, scope, user_id)"
+        )
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
+
+
+def _migrate_notification_emails_table(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "notification_emails"):
+        return
+    cols = _get_columns(conn, "notification_emails")
+    cur = conn.cursor()
+    now = _utc_now_iso()
+    if "created_at_utc" not in cols:
+        cur.execute("ALTER TABLE notification_emails ADD COLUMN created_at_utc TEXT")
+    conn.commit()
+    cur.execute(
+        "UPDATE notification_emails SET created_at_utc = ? "
+        "WHERE created_at_utc IS NULL OR created_at_utc = ''",
+        (now,),
+    )
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_notification_emails_email ON notification_emails(email)")
+    conn.commit()
+
+
+def _migrate_notification_templates_table(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "notification_templates"):
+        return
+    cols = _get_columns(conn, "notification_templates")
+    cur = conn.cursor()
+    now = _utc_now_iso()
+    if "name" not in cols:
+        cur.execute("ALTER TABLE notification_templates ADD COLUMN name TEXT")
+    if "slug" not in cols:
+        cur.execute("ALTER TABLE notification_templates ADD COLUMN slug TEXT")
+    if "subject" not in cols:
+        cur.execute("ALTER TABLE notification_templates ADD COLUMN subject TEXT")
+    if "body" not in cols:
+        cur.execute("ALTER TABLE notification_templates ADD COLUMN body TEXT")
+    if "enabled" not in cols:
+        cur.execute("ALTER TABLE notification_templates ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+    if "created_at_utc" not in cols:
+        cur.execute("ALTER TABLE notification_templates ADD COLUMN created_at_utc TEXT")
+    if "updated_at_utc" not in cols:
+        cur.execute("ALTER TABLE notification_templates ADD COLUMN updated_at_utc TEXT")
+    conn.commit()
+    cur.execute(
+        "UPDATE notification_templates SET created_at_utc = ? "
+        "WHERE created_at_utc IS NULL OR created_at_utc = ''",
+        (now,),
+    )
+    cur.execute(
+        "UPDATE notification_templates SET updated_at_utc = ? "
+        "WHERE updated_at_utc IS NULL OR updated_at_utc = ''",
+        (now,),
+    )
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_notification_templates_slug ON notification_templates(slug)")
+    conn.commit()
+
+
+def _migrate_notification_logs_table(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "notification_logs"):
+        return
+    cols = _get_columns(conn, "notification_logs")
+    cur = conn.cursor()
+    if "template_id" not in cols:
+        cur.execute("ALTER TABLE notification_logs ADD COLUMN template_id INTEGER")
+    if "event_key" not in cols:
+        cur.execute("ALTER TABLE notification_logs ADD COLUMN event_key TEXT")
+    if "sent_to" not in cols:
+        cur.execute("ALTER TABLE notification_logs ADD COLUMN sent_to TEXT")
+    if "subject" not in cols:
+        cur.execute("ALTER TABLE notification_logs ADD COLUMN subject TEXT")
+    if "body" not in cols:
+        cur.execute("ALTER TABLE notification_logs ADD COLUMN body TEXT")
+    if "success" not in cols:
+        cur.execute("ALTER TABLE notification_logs ADD COLUMN success INTEGER NOT NULL DEFAULT 1")
+    if "error" not in cols:
+        cur.execute("ALTER TABLE notification_logs ADD COLUMN error TEXT")
+    if "created_at_utc" not in cols:
+        cur.execute("ALTER TABLE notification_logs ADD COLUMN created_at_utc TEXT")
+    conn.commit()
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_notification_logs_created ON notification_logs(created_at_utc)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_notification_logs_template ON notification_logs(template_id)")
+    conn.commit()
+
+
+def _migrate_report_snapshots_table(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "report_snapshots"):
+        return
+    cols = _get_columns(conn, "report_snapshots")
+    cur = conn.cursor()
+    now = _utc_now_iso()
+    if "report_type" not in cols:
+        cur.execute("ALTER TABLE report_snapshots ADD COLUMN report_type TEXT")
+    if "date_key" not in cols:
+        cur.execute("ALTER TABLE report_snapshots ADD COLUMN date_key TEXT")
+    if "created_by" not in cols:
+        cur.execute("ALTER TABLE report_snapshots ADD COLUMN created_by INTEGER")
+    if "created_at_utc" not in cols:
+        cur.execute("ALTER TABLE report_snapshots ADD COLUMN created_at_utc TEXT")
+    conn.commit()
+    cur.execute(
+        "UPDATE report_snapshots SET created_at_utc = ? "
+        "WHERE created_at_utc IS NULL OR created_at_utc = ''",
+        (now,),
+    )
+    cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_report_snapshots_key "
+        "ON report_snapshots(report_type, date_key)"
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_report_snapshots_created ON report_snapshots(created_at_utc)")
+    conn.commit()
+
+
 def _migrate_airlines_table(conn: sqlite3.Connection) -> None:
     cols = _get_columns(conn, "airlines")
     cur = conn.cursor()
@@ -372,6 +535,50 @@ def _migrate_airline_fees_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_airline_destinations_table(conn: sqlite3.Connection) -> None:
+    cols = _get_columns(conn, "airline_destinations")
+    cur = conn.cursor()
+    now = _utc_now_iso()
+
+    if "airline_id" not in cols:
+        cur.execute("ALTER TABLE airline_destinations ADD COLUMN airline_id INTEGER")
+    if "dest_code" not in cols:
+        cur.execute("ALTER TABLE airline_destinations ADD COLUMN dest_code TEXT")
+    if "dest_name" not in cols:
+        cur.execute("ALTER TABLE airline_destinations ADD COLUMN dest_name TEXT")
+    if "active" not in cols:
+        cur.execute("ALTER TABLE airline_destinations ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+    if "created_at_utc" not in cols:
+        cur.execute("ALTER TABLE airline_destinations ADD COLUMN created_at_utc TEXT")
+    if "updated_at_utc" not in cols:
+        cur.execute("ALTER TABLE airline_destinations ADD COLUMN updated_at_utc TEXT")
+
+    conn.commit()
+
+    cur.execute(
+        "UPDATE airline_destinations SET created_at_utc = ? "
+        "WHERE created_at_utc IS NULL OR created_at_utc = ''",
+        (now,),
+    )
+    cur.execute(
+        "UPDATE airline_destinations SET updated_at_utc = ? "
+        "WHERE updated_at_utc IS NULL OR updated_at_utc = ''",
+        (now,),
+    )
+    conn.commit()
+
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_destinations_airline ON airline_destinations(airline_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_destinations_active ON airline_destinations(active)")
+    try:
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_destinations_airline_code "
+            "ON airline_destinations(airline_id, dest_code)"
+        )
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
+
+
 def _migrate_airport_service_fees_table(conn: sqlite3.Connection) -> None:
     cols = _get_columns(conn, "airport_service_fees")
     cur = conn.cursor()
@@ -416,6 +623,12 @@ def _migrate_sales_table(conn: sqlite3.Connection) -> None:
         cur.execute("ALTER TABLE sales ADD COLUMN sale_group_id TEXT")
     if "airline_id" not in cols:
         cur.execute("ALTER TABLE sales ADD COLUMN airline_id INTEGER NOT NULL DEFAULT 0")
+    if "destination_id" not in cols:
+        cur.execute("ALTER TABLE sales ADD COLUMN destination_id INTEGER")
+    if "pnr" not in cols:
+        cur.execute("ALTER TABLE sales ADD COLUMN pnr TEXT")
+    if "passenger_name" not in cols:
+        cur.execute("ALTER TABLE sales ADD COLUMN passenger_name TEXT")
     if "fee_source" not in cols:
         cur.execute("ALTER TABLE sales ADD COLUMN fee_source TEXT NOT NULL DEFAULT 'airline'")
     if "fee_id" not in cols:
@@ -484,6 +697,9 @@ def _migrate_sales_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
     cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_airline ON sales(airline_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_destination ON sales(destination_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_pnr ON sales(pnr)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_passenger ON sales(passenger_name)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_sold_at ON sales(sold_at_utc)")
     conn.commit()
 
@@ -708,6 +924,7 @@ def init_db() -> None:
                 role TEXT NOT NULL CHECK(role IN ('User', 'Admin', 'Deputy')),
                 must_change_password INTEGER NOT NULL DEFAULT 0,
                 approved INTEGER NOT NULL DEFAULT 1,
+                active INTEGER NOT NULL DEFAULT 1,
                 approved_by INTEGER,
                 approved_at_utc TEXT,
                 created_at_utc TEXT,
@@ -735,6 +952,95 @@ def init_db() -> None:
             """
         )
         conn.commit()
+
+        # NOTIFICATION EMAILS
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notification_emails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE,
+                created_at_utc TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+        _migrate_notification_emails_table(conn)
+
+        # NOTIFICATION TEMPLATES
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notification_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL UNIQUE,
+                subject TEXT NOT NULL,
+                body TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+        _migrate_notification_templates_table(conn)
+
+        # NOTIFICATION LOGS
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notification_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                template_id INTEGER,
+                event_key TEXT,
+                sent_to TEXT,
+                subject TEXT,
+                body TEXT,
+                success INTEGER NOT NULL DEFAULT 1,
+                error TEXT,
+                created_at_utc TEXT NOT NULL,
+                FOREIGN KEY(template_id) REFERENCES notification_templates(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.commit()
+        _migrate_notification_logs_table(conn)
+
+        # REPORT SNAPSHOTS
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS report_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_type TEXT NOT NULL,
+                date_key TEXT NOT NULL,
+                created_by INTEGER,
+                created_at_utc TEXT NOT NULL,
+                FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.commit()
+        _migrate_report_snapshots_table(conn)
+
+        # VARIABLE REWARDS SNAPSHOTS
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS variable_rewards_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                year INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                scope TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                total_monthly REAL NOT NULL DEFAULT 0,
+                percent REAL NOT NULL DEFAULT 0,
+                reduced_total REAL NOT NULL DEFAULT 0,
+                manual_amount REAL NOT NULL DEFAULT 0,
+                computed_amount REAL NOT NULL DEFAULT 0,
+                created_at_utc TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.commit()
+        _migrate_variable_rewards_snapshots_table(conn)
 
         # AIRLINES
         cur.execute(
@@ -773,6 +1079,24 @@ def init_db() -> None:
         conn.commit()
         _migrate_airline_fees_table(conn)
 
+        # AIRLINE DESTINATIONS
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS airline_destinations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                airline_id INTEGER NOT NULL,
+                dest_code TEXT,
+                dest_name TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL,
+                FOREIGN KEY(airline_id) REFERENCES airlines(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.commit()
+        _migrate_airline_destinations_table(conn)
+
         # AIRPORT SERVICE FEES
         cur.execute(
             """
@@ -798,6 +1122,9 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 sale_group_id TEXT,
                 airline_id INTEGER NOT NULL,
+                destination_id INTEGER,
+                pnr TEXT,
+                passenger_name TEXT,
                 fee_source TEXT NOT NULL DEFAULT 'airline',
                 fee_id INTEGER NOT NULL,
                 fee_key TEXT,
@@ -827,7 +1154,8 @@ def init_db() -> None:
                 ticket_amount REAL NOT NULL DEFAULT 0,
                 ticket_total REAL NOT NULL DEFAULT 0,
                 grand_total REAL NOT NULL DEFAULT 0,
-                FOREIGN KEY(airline_id) REFERENCES airlines(id) ON DELETE RESTRICT
+                FOREIGN KEY(airline_id) REFERENCES airlines(id) ON DELETE RESTRICT,
+                FOREIGN KEY(destination_id) REFERENCES airline_destinations(id) ON DELETE RESTRICT
             )
             """
         )
