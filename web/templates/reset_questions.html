@@ -1,0 +1,27 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<h2>Reset security questions</h2>
+<p class="muted">User: {{ user.fullname }} ({{ user.nickname }})</p>
+
+<form method="post" action="{{ url_for('reset_user_questions', user_id=user.id) }}" autocomplete="off">
+  <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+
+  <label>Security question 1</label>
+  <input type="text" name="q1" autocomplete="off" required>
+  <input type="text" name="a1" placeholder="Answer to question 1" autocomplete="off" required>
+
+  <label>Security question 2</label>
+  <input type="text" name="q2" autocomplete="off" required>
+  <input type="text" name="a2" placeholder="Answer to question 2" autocomplete="off" required>
+
+  <label>Security question 3</label>
+  <input type="text" name="q3" autocomplete="off" required>
+  <input type="text" name="a3" placeholder="Answer to question 3" autocomplete="off" required>
+
+  <button type="submit">Save questions</button>
+</form>
+<div style="text-align:center;">
+  <a href="{{ url_for('users') }}">🔙 Back to Users</a>
+</div>
+{% endblock %}

@@ -1,0 +1,114 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 100vw; }
+  body { padding: 0; }
+  .app-shell { max-width: none; }
+  .container { width: 100vw; max-width: 100vw; border-radius: 0; }
+  @media (max-width: 700px) {
+    .container { padding: 20px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Yearly Rewards Summary ({{ year }})</h2>
+
+<div style="margin-top:12px;">
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+    <label class="muted" style="margin:0;">From</label>
+    <select id="monthFromSelect" style="width:auto; margin:0;">
+      <option value="1" {% if month_from == 1 %}selected{% endif %}>January</option>
+      <option value="2" {% if month_from == 2 %}selected{% endif %}>February</option>
+      <option value="3" {% if month_from == 3 %}selected{% endif %}>March</option>
+      <option value="4" {% if month_from == 4 %}selected{% endif %}>April</option>
+      <option value="5" {% if month_from == 5 %}selected{% endif %}>May</option>
+      <option value="6" {% if month_from == 6 %}selected{% endif %}>June</option>
+      <option value="7" {% if month_from == 7 %}selected{% endif %}>July</option>
+      <option value="8" {% if month_from == 8 %}selected{% endif %}>August</option>
+      <option value="9" {% if month_from == 9 %}selected{% endif %}>September</option>
+      <option value="10" {% if month_from == 10 %}selected{% endif %}>October</option>
+      <option value="11" {% if month_from == 11 %}selected{% endif %}>November</option>
+      <option value="12" {% if month_from == 12 %}selected{% endif %}>December</option>
+    </select>
+    <label class="muted" style="margin:0;">To</label>
+    <select id="monthToSelect" style="width:auto; margin:0;">
+      <option value="1" {% if month_to == 1 %}selected{% endif %}>January</option>
+      <option value="2" {% if month_to == 2 %}selected{% endif %}>February</option>
+      <option value="3" {% if month_to == 3 %}selected{% endif %}>March</option>
+      <option value="4" {% if month_to == 4 %}selected{% endif %}>April</option>
+      <option value="5" {% if month_to == 5 %}selected{% endif %}>May</option>
+      <option value="6" {% if month_to == 6 %}selected{% endif %}>June</option>
+      <option value="7" {% if month_to == 7 %}selected{% endif %}>July</option>
+      <option value="8" {% if month_to == 8 %}selected{% endif %}>August</option>
+      <option value="9" {% if month_to == 9 %}selected{% endif %}>September</option>
+      <option value="10" {% if month_to == 10 %}selected{% endif %}>October</option>
+      <option value="11" {% if month_to == 11 %}selected{% endif %}>November</option>
+      <option value="12" {% if month_to == 12 %}selected{% endif %}>December</option>
+    </select>
+    <label class="muted" style="margin:0;">Year</label>
+    <input id="yearInput" type="number" value="{{ year }}" style="width:110px; margin:0;">
+    <form method="get" action="{{ url_for('variable_rewards_summary_pdf') }}" style="margin:0;">
+      <input type="hidden" name="year" value="{{ year }}">
+      <input type="hidden" name="month_from" value="{{ month_from }}">
+      <input type="hidden" name="month_to" value="{{ month_to }}">
+      <button type="submit" id="summaryPdfBtn" style="width:auto; margin:0; height:44px;">Save PDF</button>
+    </form>
+  </div>
+  {% if rows and rows|length > 0 %}
+    <div style="overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; border-radius:14px; overflow:hidden; border:1px solid var(--border); background:var(--bg-1);">
+        <thead>
+          <tr>
+            <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">#</th>
+            <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Full name</th>
+            <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Nickname</th>
+            <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Role</th>
+            <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Total (Range)</th>
+            <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Print</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for r in rows %}
+          <tr>
+            <td style="padding:12px; border-bottom:1px solid var(--border);">{{ loop.index }}</td>
+            <td style="padding:12px; border-bottom:1px solid var(--border);">{{ r.fullname }}</td>
+            <td style="padding:12px; border-bottom:1px solid var(--border);">{{ r.nickname }}</td>
+            <td style="padding:12px; border-bottom:1px solid var(--border);">{{ r.role }}</td>
+            <td style="padding:12px; border-bottom:1px solid var(--border);">{{ "%.2f"|format(r.computed_amount or 0) }} EUR</td>
+            <td style="padding:12px; border-bottom:1px solid var(--border);">
+              <a class="btn-small" href="{{ url_for('variable_rewards_summary_print_user', user_id=r.id, year=year, month_from=month_from, month_to=month_to) }}">Print PDF</a>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px; padding:12px 14px; border-radius:12px; border:1px solid var(--border); background:var(--bg-2);">
+      <div class="muted" style="font-weight:900; margin-bottom:6px;">Total reduced reward paid (Range)</div>
+      <div style="font-size:18px; font-weight:900;">{{ "%.2f"|format(total_reduced or 0) }} EUR</div>
+    </div>
+  {% else %}
+    <p>No yearly snapshots saved yet.</p>
+  {% endif %}
+</div>
+
+<script>
+  (function () {
+    const monthFromSelect = document.getElementById("monthFromSelect");
+    const monthToSelect = document.getElementById("monthToSelect");
+    const yearInput = document.getElementById("yearInput");
+    function reload() {
+      const params = new URLSearchParams(window.location.search);
+      if (monthFromSelect) params.set("month_from", monthFromSelect.value);
+      if (monthToSelect) params.set("month_to", monthToSelect.value);
+      if (yearInput) params.set("year", yearInput.value);
+      window.location.search = params.toString();
+    }
+    if (monthFromSelect) monthFromSelect.addEventListener("change", reload);
+    if (monthToSelect) monthToSelect.addEventListener("change", reload);
+    if (yearInput) yearInput.addEventListener("change", reload);
+  })();
+</script>
+{% endblock %}

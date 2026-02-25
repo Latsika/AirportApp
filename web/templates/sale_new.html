@@ -1,0 +1,521 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  body, .container, input, select, button, textarea {
+    font-size: 16px;
+  }
+  :root { --container-max: 100vw; }
+  body { padding: 0; }
+  .app-shell { max-width: none; }
+  .container { width: 100vw; max-width: 100vw; border-radius: 0; }
+  @media (max-width: 700px) {
+    .container { padding: 20px; }
+  }
+
+  .title {
+    text-align: center;
+    font-size: 36px;
+    font-weight: 1000;
+    margin: 0 0 14px;
+    letter-spacing: .6px;
+  }
+
+  .menu {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    padding: 12px;
+    border-radius: 16px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+  }
+
+  .menu a {
+    width: 100%;
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    color: #e2e8f0;
+    font-weight: 900;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: left;
+    display: block;
+  }
+
+  .menu a:hover { background: var(--bg-0); text-decoration: none; }
+  .menu a.active { border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56,189,248,.2); }
+
+  .card {
+    padding: 16px;
+    border-radius: 18px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+  }
+
+  .muted { opacity: .85; font-size: 16px; }
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .fee-section {
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--bg-1);
+  }
+
+  .fee-row {
+    display: grid;
+    grid-template-columns: 1fr 90px 90px 100px 80px;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .fee-row:last-child { border-bottom: none; }
+  .fee-row input[type="number"] { width: 100%; }
+  .fee-row .line-total { text-align: right; font-weight: 900; }
+
+  .total {
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    color: #e2e8f0;
+    font-weight: 900;
+    text-align: center;
+  }
+
+  button:focus-visible {
+    outline: 2px solid #38bdf8;
+    outline-offset: 2px;
+  }
+
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.6);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 60;
+  }
+
+  .modal.open { display: flex; }
+
+  .modal-card {
+    width: min(420px, 92vw);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px;
+    box-shadow: 0 20px 50px rgba(0,0,0,.45);
+    text-align: center;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 14px;
+  }
+
+  .save-btn {
+    width: auto;
+    padding: 14px 18px;
+    font-size: 1.2em;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2 class="title">New Sale</h2>
+
+  <div class="menu">
+    <a href="{{ url_for('sales') }}">Sale</a>
+    <a class="active" href="{{ url_for('sale_new') }}">New Sale</a>
+    <a href="{{ url_for('sales_list') }}">Sales List</a>
+    <a href="{{ url_for('reports') }}">Reports</a>
+  </div>
+
+<div class="card" style="margin-top:12px;">
+  <form method="post" action="{{ url_for('sale_new') }}" id="saleForm">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+
+    <div class="grid2">
+      <div>
+        <label class="muted">Airline*</label>
+        <select name="airline_id" id="airlineSelect" required>
+          <option value="" selected disabled>Select airline...</option>
+          {% for a in airlines %}
+            <option value="{{ a.id }}">{{ a.name }}{% if a.code %} ({{ a.code }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="muted">Destination*</label>
+        <select name="destination_id" id="destinationSelect" required>
+          <option value="" selected disabled>Select destination...</option>
+        </select>
+      </div>
+      <div>
+        <label class="muted">PNR (optional)</label>
+        <input name="pnr" placeholder="e.g. ABC123">
+      </div>
+      <div>
+        <label class="muted">Passenger Name (optional)</label>
+        <input name="passenger_name" placeholder="e.g. John Smith">
+      </div>
+    </div>
+
+    <div class="fee-section">
+      <div class="muted" style="margin-bottom:6px;">Airline Fees (multi select)</div>
+    <div class="grid2">
+      <div>
+        <label class="muted">Select Airline Fee</label>
+        <input id="airlineFeeSearch" list="airlineFeesDatalist" placeholder="Type to search...">
+        <datalist id="airlineFeesDatalist"></datalist>
+      </div>
+      <div style="display:flex; align-items:end;">
+        <button type="button" id="airlineFeeAdd">Add</button>
+      </div>
+    </div>
+    <div class="fee-row muted" style="font-weight:900; margin-top:8px;">
+      <div>Fee</div>
+      <div>Price</div>
+      <div>Qty</div>
+      <div>Total</div>
+      <div>Action</div>
+    </div>
+    <div id="airlineFeesList"></div>
+  </div>
+
+    <div class="fee-section">
+      <div class="muted" style="margin-bottom:6px;">Airport Service Fees (multi select)</div>
+    <div class="grid2">
+      <div>
+        <label class="muted">Select Airport Service Fee</label>
+        <input id="airportFeeSearch" list="airportFeesDatalist" placeholder="Type to search...">
+        <datalist id="airportFeesDatalist"></datalist>
+      </div>
+      <div style="display:flex; align-items:end;">
+        <button type="button" id="airportFeeAdd">Add</button>
+      </div>
+    </div>
+    <div class="fee-row muted" style="font-weight:900; margin-top:8px;">
+      <div>Fee</div>
+      <div>Price</div>
+      <div>Qty</div>
+      <div>Total</div>
+      <div>Action</div>
+    </div>
+    <div id="airportFeesList"></div>
+  </div>
+
+    <div class="grid2" style="margin-top:10px;">
+      <div>
+        <label class="muted">Plane Ticket Qty</label>
+        <input name="ticket_qty" id="ticketQtyInput" value="0">
+      </div>
+      <div>
+        <label class="muted">Plane Ticket Price (EUR)</label>
+        <input name="ticket_amount" id="ticketAmountInput" placeholder="0.00">
+      </div>
+      <div>
+        <label class="muted">Plane Ticket Total</label>
+        <div id="ticketTotal" class="total">0.00</div>
+      </div>
+      <div>
+        <label class="muted">Grand Total</label>
+        <div id="grandTotal" class="total">0.00</div>
+      </div>
+      <div>
+        <label class="muted">Payment Method*</label>
+        <select name="payment_method" id="paymentMethod" required>
+          <option value="CASH" selected>Cash</option>
+          <option value="CARD">Card</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+      <button type="submit" class="save-btn">Save</button>
+    </div>
+  </form>
+</div>
+
+<div id="cardModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="cardModalTitle">
+  <div class="modal-card">
+    <div id="cardModalTitle" style="font-weight:900; margin-bottom:6px;">You choose CARD payment are you sure?</div>
+    <div class="modal-actions">
+      <button type="button" id="cardConfirmYes">Yes</button>
+      <button type="button" id="cardConfirmCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="saveModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="saveModalTitle">
+  <div class="modal-card">
+    <div id="saveModalTitle" style="font-weight:900; margin-bottom:6px;">Chcete uložiť tento predaj?</div>
+    <div class="modal-actions">
+      <button type="button" id="saveConfirmYes">Yes</button>
+      <button type="button" id="saveConfirmCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const form = document.getElementById("saleForm");
+    const airlineFeesMap = {{ airline_fees_map|tojson }};
+    const airportFees = {{ airport_fees|tojson }};
+    const destinationsMap = {{ destinations_map|tojson }};
+
+    const airlineSelect = document.getElementById("airlineSelect");
+    const destinationSelect = document.getElementById("destinationSelect");
+    const airlineFeesList = document.getElementById("airlineFeesList");
+    const airportFeesList = document.getElementById("airportFeesList");
+    const airlineFeeSearch = document.getElementById("airlineFeeSearch");
+    const airportFeeSearch = document.getElementById("airportFeeSearch");
+    const airlineFeesDatalist = document.getElementById("airlineFeesDatalist");
+    const airportFeesDatalist = document.getElementById("airportFeesDatalist");
+    const airlineFeeAdd = document.getElementById("airlineFeeAdd");
+    const airportFeeAdd = document.getElementById("airportFeeAdd");
+    const ticketQtyInput = document.getElementById("ticketQtyInput");
+    const ticketAmountInput = document.getElementById("ticketAmountInput");
+    const ticketTotal = document.getElementById("ticketTotal");
+    const grandTotal = document.getElementById("grandTotal");
+
+    const paymentMethod = document.getElementById("paymentMethod");
+    const cardModal = document.getElementById("cardModal");
+    const cardConfirmYes = document.getElementById("cardConfirmYes");
+    const cardConfirmCancel = document.getElementById("cardConfirmCancel");
+    let previousPayment = paymentMethod.value;
+
+    const saveModal = document.getElementById("saveModal");
+    const saveConfirmYes = document.getElementById("saveConfirmYes");
+    const saveConfirmCancel = document.getElementById("saveConfirmCancel");
+    let pendingSubmit = false;
+
+    function renderAirlineDatalist(list) {
+      airlineFeesDatalist.innerHTML = "";
+      list.forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = `${f.fee_name} (${f.fee_key})`;
+        opt.dataset.feeId = f.id;
+        airlineFeesDatalist.appendChild(opt);
+      });
+    }
+
+    function renderDestinationOptions(airlineId) {
+      const list = destinationsMap[airlineId] || [];
+      destinationSelect.innerHTML = "";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Select destination...";
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      destinationSelect.appendChild(placeholder);
+      if (!list.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No destinations for this airline";
+        opt.disabled = true;
+        destinationSelect.appendChild(opt);
+        return;
+      }
+      list.forEach(d => {
+        const opt = document.createElement("option");
+        const code = d.dest_code ? ` (${d.dest_code})` : "";
+        const inactive = d.active ? "" : " [inactive]";
+        opt.value = d.id;
+        opt.textContent = `${d.dest_name}${code}${inactive}`;
+        destinationSelect.appendChild(opt);
+      });
+      if (list.length === 1) {
+        destinationSelect.value = String(list[0].id);
+      }
+    }
+
+    function parseNum(val) {
+      const n = Number(String(val || "").replace(",", "."));
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function attachFeeListeners(container) {
+      const rows = container.querySelectorAll(".fee-row");
+      rows.forEach(row => {
+        const qty = row.querySelector("input[type='number']");
+        const remove = row.querySelector(".remove-btn");
+        if (qty) qty.addEventListener("input", updateTotals);
+        if (remove) remove.addEventListener("click", () => {
+          row.remove();
+          updateTotals();
+        });
+      });
+    }
+
+    function computeSectionTotal(container) {
+      let total = 0;
+      const rows = container.querySelectorAll(".fee-row");
+      rows.forEach(row => {
+        const qty = row.querySelector("input[type='number']");
+        const line = row.querySelector(".line-total");
+        const amount = parseNum(row.dataset.amount);
+        const q = Math.max(1, parseNum(qty ? qty.value : 1));
+        const lineTotal = amount * q;
+        if (line) line.textContent = lineTotal.toFixed(2);
+        total += lineTotal;
+      });
+      return total;
+    }
+
+    function updateTotals() {
+      const airlineTotal = computeSectionTotal(airlineFeesList);
+      const airportTotal = computeSectionTotal(airportFeesList);
+      const tAmt = parseNum(ticketAmountInput.value);
+      const tQty = Math.max(0, parseNum(ticketQtyInput.value));
+      const tTotal = tAmt * tQty;
+      ticketTotal.textContent = tTotal.toFixed(2);
+      const gTotal = airlineTotal + airportTotal + tTotal;
+      grandTotal.textContent = gTotal.toFixed(2);
+    }
+
+    function addFeeRow(container, fee, prefix) {
+      const row = document.createElement("div");
+      row.className = "fee-row";
+      row.dataset.amount = fee.amount;
+      row.dataset.currency = fee.currency;
+      row.dataset.feeId = fee.id;
+      row.innerHTML = `
+        <div>${fee.fee_name} <span class="muted">(${fee.fee_key})</span>
+          <input type="hidden" name="${prefix}_fee_id" value="${fee.id}">
+        </div>
+        <div>${fee.amount} ${fee.currency}</div>
+        <input type="number" min="1" step="1" name="${prefix}_qty_${fee.id}" value="1">
+        <div class="line-total">0.00</div>
+        <button type="button" class="remove-btn">Remove</button>
+      `;
+      container.appendChild(row);
+      attachFeeListeners(container);
+      updateTotals();
+    }
+
+    function findFeeByLabel(list, label) {
+      return list.find(f => `${f.fee_name} (${f.fee_key})` === label);
+    }
+
+    airlineSelect.addEventListener("change", function () {
+      const aid = Number(airlineSelect.value || 0);
+      renderAirlineDatalist(airlineFeesMap[aid] || []);
+      renderDestinationOptions(aid);
+      airlineFeeSearch.value = "";
+    });
+
+    airlineFeeAdd.addEventListener("click", function () {
+      const aid = Number(airlineSelect.value || 0);
+      const list = airlineFeesMap[aid] || [];
+      const fee = findFeeByLabel(list, airlineFeeSearch.value);
+      if (!fee) return;
+      addFeeRow(airlineFeesList, fee, "airline");
+      airlineFeeSearch.value = "";
+    });
+
+    airportFeeAdd.addEventListener("click", function () {
+      const fee = findFeeByLabel(airportFees, airportFeeSearch.value);
+      if (!fee) return;
+      addFeeRow(airportFeesList, fee, "airport");
+      airportFeeSearch.value = "";
+    });
+
+    airportFeesDatalist.innerHTML = "";
+    airportFees.forEach(f => {
+      const opt = document.createElement("option");
+      opt.value = `${f.fee_name} (${f.fee_key})`;
+      opt.dataset.feeId = f.id;
+      airportFeesDatalist.appendChild(opt);
+    });
+
+    updateTotals();
+    if (airlineSelect.value) {
+      renderDestinationOptions(Number(airlineSelect.value || 0));
+    }
+    ticketQtyInput.addEventListener("input", updateTotals);
+    ticketAmountInput.addEventListener("input", updateTotals);
+
+    function openModal(modalEl) { modalEl.classList.add("open"); }
+    function closeModal(modalEl) { modalEl.classList.remove("open"); }
+
+    paymentMethod.addEventListener("change", function () {
+      if (paymentMethod.value === "CARD") {
+        openModal(cardModal);
+      } else {
+        previousPayment = paymentMethod.value;
+      }
+    });
+
+    cardConfirmYes.addEventListener("click", function () {
+      previousPayment = "CARD";
+      closeModal(cardModal);
+    });
+
+    cardConfirmCancel.addEventListener("click", function () {
+      paymentMethod.value = previousPayment || "CASH";
+      closeModal(cardModal);
+      paymentMethod.focus();
+    });
+
+    cardModal.addEventListener("click", function (e) {
+      if (e.target === cardModal) {
+        paymentMethod.value = previousPayment || "CASH";
+        closeModal(cardModal);
+        paymentMethod.focus();
+      }
+    });
+
+    function focusNext(current) {
+      const focusable = Array.from(form.querySelectorAll("input, select, button, textarea"))
+        .filter(el => !el.disabled && el.type !== "hidden");
+      const idx = focusable.indexOf(current);
+      if (idx >= 0 && idx < focusable.length - 1) {
+        focusable[idx + 1].focus();
+      }
+    }
+
+    form.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      const target = e.target;
+      const tag = (target && target.tagName) ? target.tagName.toLowerCase() : "";
+      if (tag === "textarea") return;
+      if (tag === "button") return;
+      e.preventDefault();
+      focusNext(target);
+    });
+
+    form.addEventListener("submit", function (e) {
+      if (pendingSubmit) return;
+      e.preventDefault();
+      openModal(saveModal);
+    });
+
+    saveConfirmYes.addEventListener("click", function () {
+      pendingSubmit = true;
+      closeModal(saveModal);
+      form.requestSubmit();
+    });
+
+    saveConfirmCancel.addEventListener("click", function () {
+      closeModal(saveModal);
+    });
+
+    saveModal.addEventListener("click", function (e) {
+      if (e.target === saveModal) closeModal(saveModal);
+    });
+  })();
+</script>
+{% endblock %}

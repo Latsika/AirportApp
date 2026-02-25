@@ -1,0 +1,98 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 1100px; }
+
+  .topline { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
+  .muted { opacity:.85; font-size:12px; }
+  .card { padding:12px 14px; border-radius:14px; background:var(--bg-1); border:1px solid var(--border); margin-top:12px; }
+
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns:1fr; } }
+  .checkbox-row { display:flex; align-items:center; gap:8px; height:100%; }
+  .checkbox-row .muted { margin:0; }
+
+  table { width:100%; border-collapse:collapse; border-radius:14px; overflow:hidden; border:1px solid var(--border); background:var(--bg-1); margin-top:12px; }
+  th, td { padding:12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { font-weight:900; opacity:.95; }
+  tr:last-child td { border-bottom:none; }
+
+  .btn-small { width:auto; margin:0; padding:8px 12px; border-radius:999px; border:1px solid var(--border); background:var(--bg-2); color:#e2e8f0; font-weight:900; text-decoration:none; cursor:pointer; }
+  .danger { border-color:#7f1d1d; background:#2a0f12; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topline">
+  <div>
+    <h2>Destinations – {{ airline.name }}{% if airline.code %} ({{ airline.code }}){% endif %}</h2>
+    <div class="muted">Manage destinations for this airline.</div>
+  </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a class="btn-small" href="{{ url_for('airline_detail', airline_id=airline.id) }}">Back to airline</a>
+    <a class="btn-small" href="{{ url_for('airlines') }}">All airlines</a>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin:0 0 10px;">Add new destination</h3>
+  <form method="post" action="{{ url_for('airline_destinations_add', airline_id=airline.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+
+    <div class="grid2">
+      <div>
+        <div class="muted">Destination name*</div>
+        <input name="dest_name" placeholder="London Heathrow" required>
+      </div>
+      <div>
+        <div class="muted">Destination code</div>
+        <input name="dest_code" placeholder="LHR">
+      </div>
+      <div class="checkbox-row">
+        <label class="muted" style="display:inline-flex; gap:8px; align-items:center;">
+          <input type="checkbox" name="active" checked>
+          <span>Active</span>
+        </label>
+      </div>
+    </div>
+
+    <button type="submit" style="margin-top:10px;">SAVE</button>
+  </form>
+</div>
+
+{% if destinations and destinations|length > 0 %}
+<table>
+  <thead>
+    <tr>
+      <th>Code</th>
+      <th>Name</th>
+      <th>Active</th>
+      <th>Updated</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for d in destinations %}
+    <tr>
+      <td>{{ d.dest_code or "-" }}</td>
+      <td>{{ d.dest_name }}</td>
+      <td>{{ "YES" if d.active else "NO" }}</td>
+      <td class="muted">{{ d.updated_at_utc }}</td>
+      <td>
+        <a class="btn-small" href="{{ url_for('airline_destination_edit', airline_id=airline.id, destination_id=d.id) }}">EDIT</a>
+        <form method="post" action="{{ url_for('airline_destination_delete', airline_id=airline.id, destination_id=d.id) }}"
+              onsubmit="return confirm('Delete destination {{ d.dest_name }}?');"
+              style="display:inline; margin:0;">
+          <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+          <button class="btn-small danger" type="submit">DELETE</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted" style="margin-top:12px;">No destinations yet. Add the first destination above.</p>
+{% endif %}
+{% endblock %}

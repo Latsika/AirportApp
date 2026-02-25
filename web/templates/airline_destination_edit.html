@@ -1,0 +1,45 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 700px; }
+  .card { padding:14px 16px; border-radius:14px; background:var(--bg-1); border:1px solid var(--border); }
+  .muted { opacity:.85; font-size:12px; }
+  .row { display:grid; gap:10px; }
+  .checkbox-row { display:flex; align-items:center; gap:8px; }
+  .btn-row { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .btn-small { width:auto; margin:0; padding:8px 12px; border-radius:999px; border:1px solid var(--border); background:var(--bg-2); color:#e2e8f0; font-weight:900; text-decoration:none; cursor:pointer; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Edit Destination</h2>
+
+<div class="card">
+  <form method="post" action="{{ url_for('airline_destination_edit', airline_id=airline_id, destination_id=destination.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+
+    <div class="row">
+      <div>
+        <div class="muted">Destination name*</div>
+        <input name="dest_name" value="{{ destination.dest_name }}" required>
+      </div>
+      <div>
+        <div class="muted">Destination code</div>
+        <input name="dest_code" value="{{ destination.dest_code or '' }}">
+      </div>
+      <div class="checkbox-row">
+        <label class="muted" style="display:inline-flex; gap:8px; align-items:center;">
+          <input type="checkbox" name="active" {% if destination.active %}checked{% endif %}>
+          <span>Active</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button type="submit">SAVE</button>
+      <a class="btn-small" href="{{ url_for('airline_destinations', airline_id=airline_id) }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

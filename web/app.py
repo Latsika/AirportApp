@@ -100,6 +100,8 @@ def _configure_logging() -> None:
 
 
 _configure_logging()
+init_db()
+ensure_default_admin(hash_password)
 
 
 def _set_app_boot_id() -> str:
@@ -110,9 +112,6 @@ def _set_app_boot_id() -> str:
 
 
 APP_BOOT_ID = _set_app_boot_id()
-
-init_db()
-ensure_default_admin(hash_password)
 
 PASSWORD_RE = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$")
 APPROVER_ROLES = {"Admin", "Deputy"}

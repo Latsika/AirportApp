@@ -1,0 +1,829 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 100vw; }
+  body { padding: 0; }
+  .app-shell { max-width: none; }
+  .container { width: 100vw; max-width: 100vw; border-radius: 0; }
+  .title { text-align:center; font-size:36px; font-weight:1000; margin:0 0 14px; letter-spacing:.6px; }
+  .menu { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px; padding:12px; border-radius:16px; background:var(--bg-1); border:1px solid var(--border); }
+  .menu a { width:100%; margin:0; padding:12px 14px; border-radius:14px; border:1px solid var(--border); background:var(--bg-2); color:var(--text); font-weight:900; cursor:pointer; text-decoration:none; text-align:left; display:block; }
+  .menu a:hover { background:var(--bg-0); text-decoration:none; }
+  .menu a.active { border-color:#38bdf8; box-shadow:0 0 0 2px rgba(56,189,248,.2); }
+  .card { padding:16px; border-radius:18px; background:var(--bg-1); border:1px solid var(--border); margin-top:12px; }
+  .muted { opacity:.85; font-size:12px; }
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+  .filters-wrap { overflow-x: auto; }
+  .filters { display:flex; gap:12px; flex-wrap:nowrap; }
+  .filters > div { min-width: 240px; }
+  .check-list { border:1px solid var(--border); border-radius:12px; padding:8px; background:var(--bg-1); }
+  .check-item { display:flex; gap:8px; align-items:center; padding:4px 0; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .actions.between { justify-content: space-between; align-items:center; }
+  .btn-action {
+    padding:6px 10px;
+    font-size:12px;
+    border-radius:999px;
+    width:120px;
+    text-align:center;
+    
+    
+    
+    text-decoration:none;
+    display:inline-block;
+    margin-bottom:0;
+  }
+  .btn-export { padding:6px 10px; font-size:12px; border-radius:999px; width:120px; text-align:center; display:inline-block; }
+  .date-input { max-width: 220px; }
+  input[type="date"] { color-scheme: dark; }
+  .btn-small { width:auto; margin:0; padding:8px 12px; border-radius:999px; border:1px solid var(--border); background:var(--bg-2); color:var(--text); font-weight:900; text-decoration:none; cursor:pointer; }
+  .preset-row { display:flex; gap:8px; flex-wrap:wrap; }
+  .select-box { width: 100%; min-width: 0; min-height:140px; }
+  .select-box.compact { min-height:80px; }
+  .filter-input { width: 100%; min-width: 0; }
+  .filter-input { margin:6px 0 8px; width:100%; }
+  .selected-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:10px; }
+  .selected-card { border:2px solid var(--border); background:var(--bg-2); border-radius:14px; padding:12px; }
+  .selected-list { margin-top:6px; font-weight:700; font-size:13px; }
+  table { width:100%; border-collapse:collapse; border-radius:14px; overflow:hidden; border:1px solid var(--border); background:var(--bg-1); margin-top:8px; }
+  th, td { padding:12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { font-weight:900; opacity:.95; }
+  tr:last-child td { border-bottom:none; }
+  .totals-strong { font-size: 15px; font-weight: 900; }
+  .totals-grid { display:grid; grid-template-columns: repeat(3, minmax(140px, 1fr)); gap:10px; margin-top:8px; }
+  .totals-card { border:2px solid var(--border); background:var(--bg-2); border-radius:14px; padding:12px; text-align:center; }
+  .chart { margin-top:10px; }
+  .legend { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:8px; margin-top:10px; }
+  .legend-item { display:flex; gap:8px; align-items:center; font-size:12px; }
+  .legend-color { width:14px; height:14px; border-radius:3px; border:1px solid var(--border); }
+  @media (max-width: 900px) { .selected-grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 700px) {
+    .grid2 { grid-template-columns: 1fr; }
+    .selected-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2 class="title">Custom Report</h2>
+
+<div class="menu">
+  <a href="{{ url_for('sales') }}">Sale</a>
+  <a href="{{ url_for('sale_new') }}">New Sale</a>
+  <a href="{{ url_for('sales_list') }}">Sales List</a>
+  <a class="active" href="{{ url_for('reports') }}">Reports</a>
+</div>
+
+<div class="card">
+  <div class="menu">
+    <a href="{{ url_for('reports_daily') }}">Daily Report</a>
+    <a href="{{ url_for('reports_monthly') }}">Monthly Report</a>
+    <a class="active" href="{{ url_for('reports_custom') }}">Custom Report</a>
+  </div>
+</div>
+
+<div class="card">
+  <form method="get" action="{{ url_for('reports_custom') }}" id="customReportForm">
+    <div class="grid2">
+      <div>
+        <label class="muted">Date From</label>
+        <input class="date-input" type="date" name="date_from" id="dateFrom" value="{{ date_from }}">
+      </div>
+      <div>
+        <label class="muted">Date To</label>
+        <input class="date-input" type="date" name="date_to" id="dateTo" value="{{ date_to }}">
+      </div>
+    </div>
+    <div class="preset-row" style="margin-top:8px;">
+      <button type="button" class="btn-small" data-preset="day">Current day</button>
+      <button type="button" class="btn-small" data-preset="month">Current month</button>
+      <button type="button" class="btn-small" data-preset="year">Current year</button>
+    </div>
+
+    <div class="filters-wrap" style="margin-top:12px;">
+    <div class="filters">
+      <div>
+        <label class="muted">Airline or Airport fee (multi)</label>
+        <input id="airlineFilter" class="filter-input" type="text" placeholder="Type to filter airlines...">
+        <select class="select-box" id="airlineSelect" name="airline_id" multiple>
+          <option value="airport" {% if "airport" in selected_airlines %}selected{% endif %}>Airport Fees</option>
+          {% for a in airlines %}
+            <option value="{{ a.id }}" {% if a.id|string in selected_airlines %}selected{% endif %}>
+              {{ a.name }}{% if a.code %} ({{ a.code }}){% endif %}
+            </option>
+          {% endfor %}
+        </select>
+        <div class="selected-list" id="airlineSelectedList"></div>
+      </div>
+      <div>
+        <label class="muted">Destination (multi)</label>
+        <input id="destinationFilter" class="filter-input" type="text" placeholder="Type to filter destinations...">
+        <select class="select-box" id="destinationSelect" name="destination_id" multiple></select>
+        <div class="selected-list" id="destinationSelectedList"></div>
+      </div>
+      <div>
+        <label class="muted">Service / Fee (multi)</label>
+        <input id="itemFilter" class="filter-input" type="text" placeholder="Type to filter services...">
+        <select class="select-box" id="itemSelect" name="item_id" multiple></select>
+        <div class="selected-list" id="itemSelectedList"></div>
+      </div>
+      <div>
+        <label class="muted">Sold By (multi)</label>
+        <input id="soldByFilter" class="filter-input" type="text" placeholder="Type to filter sellers...">
+        <select class="select-box" id="soldBySelect" name="sold_by" multiple>
+          {% for u in sellers %}
+            <option value="{{ u.id }}" {% if u.id|string in selected_sellers %}selected{% endif %}>
+              {{ u.fullname or u.nickname }}
+            </option>
+          {% endfor %}
+        </select>
+        <div class="selected-list" id="soldBySelectedList"></div>
+      </div>
+      <div>
+        <label class="muted">Payment Method (multi)</label>
+        <input id="paymentFilter" class="filter-input" type="text" placeholder="Type to filter payment...">
+        <select class="select-box compact" id="paymentSelect" name="payment_method" multiple>
+          <option value="CASH" {% if 'CASH' in selected_payments %}selected{% endif %}>CASH</option>
+          <option value="CARD" {% if 'CARD' in selected_payments %}selected{% endif %}>CARD</option>
+        </select>
+        <div class="selected-list" id="paymentSelectedList"></div>
+      </div>
+    </div>
+    </div>
+
+    <div class="actions between" style="margin-top:12px;">
+      <button type="submit" style="font-size: 1.05em; padding: 13px 16px;">Load report</button>
+      <div style="margin-left:auto;">
+        <a class="btn-action" style="  " href="{{ url_for('reports_custom_export', date_from=date_from, date_to=date_to, format='pdf', airline_id=selected_airlines, destination_id=selected_destinations, item_id=selected_items, payment_method=selected_payments, sold_by=selected_sellers) }}">SAVE</a>
+      </div>
+    </div>
+    <div class="actions" style="margin-top:10px;">
+      <a class="btn-action" style="  " href="{{ url_for('reports_custom_export', date_from=date_from, date_to=date_to, format='csv', airline_id=selected_airlines, destination_id=selected_destinations, item_id=selected_items, payment_method=selected_payments, sold_by=selected_sellers) }}">Export .csv</a>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Selected Items</h3>
+  <div class="selected-grid" style="margin-top:10px;">
+    <div class="selected-card">
+      <div class="muted" style="font-weight:900;">Fee Group + Airlines</div>
+      <div class="selected-list">
+        {% if selected_source_labels and selected_airline_labels %}
+          {{ selected_source_labels|join(", ") }} | {{ selected_airline_labels|join(", ") }}
+        {% elif selected_source_labels %}
+          {{ selected_source_labels|join(", ") }}
+        {% elif selected_airline_labels %}
+          {{ selected_airline_labels|join(", ") }}
+        {% else %}
+          None selected
+        {% endif %}
+      </div>
+    </div>
+    <div class="selected-card">
+      <div class="muted" style="font-weight:900;">Services / Items</div>
+      <div class="selected-list">
+        {{ selected_item_labels|join(", ") if selected_item_labels else "None selected" }}
+      </div>
+    </div>
+    <div class="selected-card">
+      <div class="muted" style="font-weight:900;">Destinations</div>
+      <div class="selected-list">
+        {{ selected_destination_labels|join(", ") if selected_destination_labels else "None selected" }}
+      </div>
+    </div>
+    <div class="selected-card">
+      <div class="muted" style="font-weight:900;">Sold By</div>
+      <div class="selected-list">
+        {{ selected_seller_labels|join(", ") if selected_seller_labels else "None selected" }}
+      </div>
+    </div>
+    <div class="selected-card">
+      <div class="muted" style="font-weight:900;">Payment</div>
+      <div class="selected-list">
+        {{ selected_payment_labels|join(", ") if selected_payment_labels else "None selected" }}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Airline Detail Report ({{ date_from }} to {{ date_to }})</h3>
+  {% if airline_detail_rows %}
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>PNR</th>
+          <th>Passenger Name</th>
+          <th>Airline Fee</th>
+          <th>Amount</th>
+          <th>Cash/Card</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in airline_detail_rows %}
+        <tr>
+          <td>{{ r.sold_date or "-" }}</td>
+          <td>{{ r.pnr or "-" }}</td>
+          <td>{{ r.passenger_name or "-" }}</td>
+          <td>{{ r.fee_name or "-" }}</td>
+          <td>{{ r.total_amount }}</td>
+          <td>{{ r.payment_method or "-" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <h4 style="margin-top:12px;">Totals by Airline Fee</h4>
+    <table>
+      <thead>
+        <tr>
+          <th>Airline Fee</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for t in airline_fee_totals %}
+        <tr>
+          <td>{{ t.fee_name }}</td>
+          <td>{{ t.total }}</td>
+        </tr>
+      {% endfor %}
+        <tr>
+          <td><strong>Grand Total</strong></td>
+          <td><strong>{{ airline_fee_grand_total }}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted" style="margin-top:10px;">No airline detail rows for selected filters.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>Statistics in Numbers ({{ date_from }} to {{ date_to }})</h3>
+  {% if airline_items_summary %}
+    <h4 style="margin-top:10px;">Airline Fees</h4>
+    <table>
+      <thead>
+        <tr>
+          <th>Airline</th>
+          {% if show_destination %}<th>Destination</th>{% endif %}
+          <th>Item Key</th><th>Item Name</th><th>Qty</th><th>Total</th><th>Cash</th><th>Card</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in airline_items_summary %}
+        <tr>
+          <td>{{ r.name }}{% if r.code %} ({{ r.code }}){% endif %}</td>
+          {% if show_destination %}
+            <td>
+              {% if r.destination_name and r.destination_code %}
+                {{ r.destination_name }} ({{ r.destination_code }})
+              {% elif r.destination_name %}
+                {{ r.destination_name }}
+              {% elif r.destination_code %}
+                {{ r.destination_code }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          {% endif %}
+          <td>{{ r.fee_key }}</td>
+          <td>{{ r.fee_name }}</td>
+          <td>{{ r.qty }}</td>
+          <td>{{ r.total }}</td>
+          <td>{{ r.cash_total }}</td>
+          <td>{{ r.card_total }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <h4>Totals by Airline</h4>
+    <table>
+      <thead><tr><th>Airline</th><th>Total</th><th>Cash</th><th>Card</th></tr></thead>
+      <tbody>
+      {% for r in airline_totals %}
+        <tr>
+          <td>{{ r.name }}{% if r.code %} ({{ r.code }}){% endif %}</td>
+          <td>{{ r.total }}</td>
+          <td>{{ r.cash_total }}</td>
+          <td>{{ r.card_total }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="card" style="margin-top:10px;">
+      <div class="muted" style="font-weight:900; margin-bottom:6px;">Airline Fees Total (All)</div>
+      <div class="totals-grid">
+        <div class="totals-card">
+          <div class="muted" style="font-weight:900; margin-bottom:6px;">Total</div>
+          <div class="totals-strong">{{ airline_all.total }}</div>
+        </div>
+        <div class="totals-card">
+          <div class="muted" style="font-weight:900; margin-bottom:6px;">Card</div>
+          <div class="totals-strong">{{ airline_all.card_total }}</div>
+        </div>
+        <div class="totals-card">
+          <div class="muted" style="font-weight:900; margin-bottom:6px;">Cash</div>
+          <div class="totals-strong">{{ airline_all.cash_total }}</div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if airport_items_summary %}
+    <h4 style="margin-top:14px;">Airport Service Fees</h4>
+    <table>
+      <thead>
+        <tr>
+          <th>Airline</th>
+          {% if show_destination %}<th>Destination</th>{% endif %}
+          <th>Item Key</th><th>Item Name</th><th>Qty</th><th>Total</th><th>Cash</th><th>Card</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in airport_items_summary %}
+        <tr>
+          <td>{{ r.name }}{% if r.code %} ({{ r.code }}){% endif %}</td>
+          {% if show_destination %}
+            <td>
+              {% if r.destination_name and r.destination_code %}
+                {{ r.destination_name }} ({{ r.destination_code }})
+              {% elif r.destination_name %}
+                {{ r.destination_name }}
+              {% elif r.destination_code %}
+                {{ r.destination_code }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          {% endif %}
+          <td>{{ r.fee_key }}</td>
+          <td>{{ r.fee_name }}</td>
+          <td>{{ r.qty }}</td>
+          <td>{{ r.total }}</td>
+          <td>{{ r.cash_total }}</td>
+          <td>{{ r.card_total }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <h4>Totals by Airline</h4>
+    <table>
+      <thead><tr><th>Airline</th><th>Total</th><th>Cash</th><th>Card</th></tr></thead>
+      <tbody>
+      {% for r in airport_totals %}
+        <tr>
+          <td>{{ r.name }}{% if r.code %} ({{ r.code }}){% endif %}</td>
+          <td>{{ r.total }}</td>
+          <td>{{ r.cash_total }}</td>
+          <td>{{ r.card_total }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="card" style="margin-top:10px;">
+      <div class="muted" style="font-weight:900; margin-bottom:6px;">Airport Fees Total (All)</div>
+      <div class="totals-grid">
+        <div class="totals-card">
+          <div class="muted" style="font-weight:900; margin-bottom:6px;">Total</div>
+          <div class="totals-strong">{{ airport_all.total }}</div>
+        </div>
+        <div class="totals-card">
+          <div class="muted" style="font-weight:900; margin-bottom:6px;">Card</div>
+          <div class="totals-strong">{{ airport_all.card_total }}</div>
+        </div>
+        <div class="totals-card">
+          <div class="muted" style="font-weight:900; margin-bottom:6px;">Cash</div>
+          <div class="totals-strong">{{ airport_all.cash_total }}</div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if airline_items_summary or airport_items_summary %}
+    <div class="card" style="margin-top:12px;">
+      <div class="muted" style="font-weight:900; margin-bottom:6px;">All Fees | Total</div>
+      <div class="totals-grid">
+        <div class="totals-card">
+          <div class="muted" style="font-weight:900; margin-bottom:6px;">Total</div>
+          <div class="totals-strong">{{ combined_all.total }}</div>
+        </div>
+        <div class="totals-card">
+          <div class="muted" style="font-weight:900; margin-bottom:6px;">Card</div>
+          <div class="totals-strong">{{ combined_all.card_total }}</div>
+        </div>
+        <div class="totals-card">
+          <div class="muted" style="font-weight:900; margin-bottom:6px;">Cash</div>
+          <div class="totals-strong">{{ combined_all.cash_total }}</div>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top:10px;">Hladane data neexistuju pre zvolene filtre.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>{{ chart_title }} - Quantity</h3>
+  {% if chart_data and chart_data.series_qty and chart_data.series_qty|length > 0 %}
+    <div id="chartQty" class="chart" style="height:320px;"></div>
+    <div class="legend">
+      {% for s in chart_data.series_qty %}
+        <div class="legend-item">
+          <span class="legend-color" style="background: {{ s.color }}"></span>
+          <span class="muted">{{ s.label }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No chart data.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <h3>{{ chart_title }} - Amount</h3>
+  {% if chart_data and chart_data.series_sum and chart_data.series_sum|length > 0 %}
+    <div id="chartSum" class="chart" style="height:320px;"></div>
+    <div class="legend">
+      {% for s in chart_data.series_sum %}
+        <div class="legend-item">
+          <span class="legend-color" style="background: {{ s.color }}"></span>
+          <span class="muted">{{ s.label }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No chart data.</p>
+  {% endif %}
+</div>
+
+
+<script>
+  (function () {
+    const airlineFeesMap = {{ airline_fees_map|tojson }};
+    const airportFees = {{ airport_fees_list|tojson }};
+    const airlines = {{ airlines_json|tojson }};
+    const destinations = {{ destinations_json|tojson }};
+    const destinationsMap = {{ destinations_map|tojson }};
+    const selectedItems = new Set({{ selected_items|tojson }});
+    const selectedDestinations = new Set({{ selected_destinations|tojson }});
+
+    const airlineSelect = document.getElementById("airlineSelect");
+    const itemSelect = document.getElementById("itemSelect");
+    const airlineFilter = document.getElementById("airlineFilter");
+    const destinationSelect = document.getElementById("destinationSelect");
+    const soldBySelect = document.getElementById("soldBySelect");
+    const destinationFilter = document.getElementById("destinationFilter");
+    const soldByFilter = document.getElementById("soldByFilter");
+    const itemFilter = document.getElementById("itemFilter");
+    const paymentFilter = document.getElementById("paymentFilter");
+    const paymentSelect = document.getElementById("paymentSelect");
+    const airlineSelectedList = document.getElementById("airlineSelectedList");
+    const itemSelectedList = document.getElementById("itemSelectedList");
+    const destinationSelectedList = document.getElementById("destinationSelectedList");
+    const soldBySelectedList = document.getElementById("soldBySelectedList");
+    const paymentSelectedList = document.getElementById("paymentSelectedList");
+
+    function applyFilter(selectEl, query) {
+      const q = (query || "").toLowerCase();
+      Array.from(selectEl.options).forEach(opt => {
+        const match = !q || opt.textContent.toLowerCase().includes(q);
+        opt.hidden = !match;
+      });
+    }
+
+    function enableClickMultiSelect(selectEl, onChange) {
+      if (!selectEl) return;
+      selectEl.addEventListener("mousedown", (e) => {
+        const opt = e.target;
+        if (!opt || opt.tagName !== "OPTION") return;
+        e.preventDefault();
+        opt.selected = !opt.selected;
+        if (onChange) onChange();
+      });
+    }
+
+    function renderSelectedList(selectEl, container) {
+      if (!selectEl || !container) return;
+      const selected = Array.from(selectEl.selectedOptions).map(opt => ({
+        value: opt.value,
+        label: opt.textContent,
+      }));
+      if (!selected.length) {
+        container.textContent = "None selected";
+        return;
+      }
+      container.innerHTML = "";
+      selected.forEach(s => {
+        const pill = document.createElement("span");
+        pill.style.display = "inline-flex";
+        pill.style.alignItems = "center";
+        pill.style.gap = "6px";
+        pill.style.padding = "4px 8px";
+        pill.style.margin = "4px 6px 0 0";
+        pill.style.border = "1px solid var(--border)";
+        pill.style.borderRadius = "10px";
+        pill.style.background = "var(--bg-1)";
+        pill.textContent = s.label;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = "x";
+        btn.style.marginLeft = "6px";
+        btn.style.border = "none";
+        btn.style.background = "transparent";
+        btn.style.color = "#94a3b8";
+        btn.style.cursor = "pointer";
+        btn.addEventListener("click", () => {
+          const opt = Array.from(selectEl.options).find(o => o.value === s.value);
+          if (opt) opt.selected = false;
+          renderSelectedList(selectEl, container);
+          if (selectEl === airlineSelect) buildItems();
+        });
+        pill.appendChild(btn);
+        container.appendChild(pill);
+      });
+    }
+
+    function getSelectedAirlineIds() {
+      return Array.from(airlineSelect.selectedOptions)
+        .map(opt => opt.value)
+        .filter(v => /^\d+$/.test(v))
+        .map(v => Number(v));
+    }
+
+    function buildDestinations() {
+      const selectedAirlines = getSelectedAirlineIds();
+      const airlineIds = selectedAirlines.length
+        ? selectedAirlines
+        : Object.keys(destinationsMap).map(id => Number(id));
+
+      const opts = [];
+      airlineIds.forEach(id => {
+        const airline = airlines.find(a => a.id === id);
+        const airlineLabel = airline ? (airline.code ? `${airline.name} (${airline.code})` : airline.name) : `Airline ${id}`;
+        (destinationsMap[id] || []).forEach(d => {
+          const code = d.dest_code ? ` (${d.dest_code})` : "";
+          const inactive = d.active ? "" : " [inactive]";
+          opts.push({
+            value: String(d.id),
+            label: `${airlineLabel} - ${d.dest_name}${code}${inactive}`,
+          });
+        });
+      });
+
+      destinationSelect.innerHTML = "";
+      opts.forEach(o => {
+        const opt = document.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.label;
+        if (selectedDestinations.has(o.value)) opt.selected = true;
+        destinationSelect.appendChild(opt);
+      });
+      applyFilter(destinationSelect, destinationFilter ? destinationFilter.value : "");
+      renderSelectedList(destinationSelect, destinationSelectedList);
+    }
+
+    function buildItems() {
+      const selectedAirlines = getSelectedAirlineIds();
+      const includeAirport = Array.from(airlineSelect.selectedOptions).some(opt => opt.value === "airport");
+      const includeAirline = selectedAirlines.length > 0;
+
+      const opts = [];
+      if (includeAirline) {
+        const airlineIds = selectedAirlines.length
+          ? selectedAirlines
+          : Object.keys(airlineFeesMap).map(id => Number(id));
+        airlineIds.forEach(id => {
+          const airline = airlines.find(a => a.id === id);
+          const name = airline ? (airline.code ? `${airline.name} (${airline.code})` : airline.name) : `Airline ${id}`;
+          (airlineFeesMap[id] || []).forEach(f => {
+            opts.push({
+              value: `airline:${f.id}`,
+              label: `${name} - ${f.fee_key} - ${f.fee_name}`,
+            });
+          });
+          opts.push({ value: `ticket:${id}`, label: `${name} Plane Ticket` });
+        });
+      }
+
+      if (includeAirport) {
+        airportFees.forEach(f => {
+          opts.push({
+            value: `airport:${f.id}`,
+            label: `Airport - ${f.fee_key} - ${f.fee_name}`,
+          });
+        });
+      }
+
+      itemSelect.innerHTML = "";
+      opts.forEach(o => {
+        const opt = document.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.label;
+        if (selectedItems.has(o.value)) opt.selected = true;
+        itemSelect.appendChild(opt);
+      });
+      applyFilter(itemSelect, itemFilter ? itemFilter.value : "");
+      renderSelectedList(itemSelect, itemSelectedList);
+    }
+
+    airlineSelect.addEventListener("change", () => {
+      buildItems();
+      buildDestinations();
+      renderSelectedList(airlineSelect, airlineSelectedList);
+    });
+    airlineSelect.addEventListener("dblclick", (e) => {
+      const opt = e.target;
+      if (opt && opt.tagName === "OPTION") {
+        opt.selected = true;
+        buildItems();
+        renderSelectedList(airlineSelect, airlineSelectedList);
+      }
+    });
+    enableClickMultiSelect(airlineSelect, () => {
+      buildItems();
+      buildDestinations();
+      renderSelectedList(airlineSelect, airlineSelectedList);
+    });
+    if (airlineFilter) {
+      airlineFilter.addEventListener("input", () => applyFilter(airlineSelect, airlineFilter.value));
+    }
+    if (destinationFilter) {
+      destinationFilter.addEventListener("input", () => applyFilter(destinationSelect, destinationFilter.value));
+    }
+    if (itemFilter) {
+      itemFilter.addEventListener("input", () => applyFilter(itemSelect, itemFilter.value));
+    }
+    destinationSelect.addEventListener("change", () => renderSelectedList(destinationSelect, destinationSelectedList));
+    destinationSelect.addEventListener("dblclick", (e) => {
+      const opt = e.target;
+      if (opt && opt.tagName === "OPTION") {
+        opt.selected = true;
+        renderSelectedList(destinationSelect, destinationSelectedList);
+      }
+    });
+    enableClickMultiSelect(destinationSelect, () => renderSelectedList(destinationSelect, destinationSelectedList));
+    itemSelect.addEventListener("change", () => renderSelectedList(itemSelect, itemSelectedList));
+    itemSelect.addEventListener("dblclick", (e) => {
+      const opt = e.target;
+      if (opt && opt.tagName === "OPTION") {
+        opt.selected = true;
+        renderSelectedList(itemSelect, itemSelectedList);
+      }
+    });
+    enableClickMultiSelect(itemSelect, () => renderSelectedList(itemSelect, itemSelectedList));
+    if (soldByFilter) {
+      soldByFilter.addEventListener("input", () => applyFilter(soldBySelect, soldByFilter.value));
+    }
+    soldBySelect.addEventListener("change", () => renderSelectedList(soldBySelect, soldBySelectedList));
+    soldBySelect.addEventListener("dblclick", (e) => {
+      const opt = e.target;
+      if (opt && opt.tagName === "OPTION") {
+        opt.selected = true;
+        renderSelectedList(soldBySelect, soldBySelectedList);
+      }
+    });
+    enableClickMultiSelect(soldBySelect, () => renderSelectedList(soldBySelect, soldBySelectedList));
+    if (paymentSelect) {
+      paymentSelect.addEventListener("change", () => renderSelectedList(paymentSelect, paymentSelectedList));
+      paymentSelect.addEventListener("dblclick", (e) => {
+        const opt = e.target;
+        if (opt && opt.tagName === "OPTION") {
+          opt.selected = true;
+          renderSelectedList(paymentSelect, paymentSelectedList);
+        }
+      });
+      enableClickMultiSelect(paymentSelect, () => renderSelectedList(paymentSelect, paymentSelectedList));
+    }
+    if (paymentFilter) {
+      paymentFilter.addEventListener("input", () => applyFilter(paymentSelect, paymentFilter.value));
+    }
+
+    buildItems();
+    buildDestinations();
+    renderSelectedList(airlineSelect, airlineSelectedList);
+    renderSelectedList(itemSelect, itemSelectedList);
+    renderSelectedList(destinationSelect, destinationSelectedList);
+    renderSelectedList(soldBySelect, soldBySelectedList);
+    renderSelectedList(paymentSelect, paymentSelectedList);
+
+    document.querySelectorAll("[data-preset]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const preset = btn.getAttribute("data-preset");
+        const now = new Date();
+        const fromEl = document.getElementById("dateFrom");
+        const toEl = document.getElementById("dateTo");
+        if (!fromEl || !toEl) return;
+        if (preset === "day") {
+          const iso = now.toISOString().slice(0, 10);
+          fromEl.value = iso;
+          toEl.value = iso;
+        } else if (preset === "month") {
+          const y = now.getFullYear();
+          const m = now.getMonth();
+          const first = new Date(y, m, 1).toISOString().slice(0, 10);
+          const last = new Date(y, m + 1, 0).toISOString().slice(0, 10);
+          fromEl.value = first;
+          toEl.value = last;
+        } else if (preset === "year") {
+          const y = now.getFullYear();
+          fromEl.value = `${y}-01-01`;
+          toEl.value = `${y}-12-31`;
+        }
+      });
+    });
+
+    const chartData = {{ chart_data|tojson }};
+    function renderChart(chartEl, dataSeries) {
+      if (!chartEl || !chartData || !dataSeries || !dataSeries.length) return;
+      const dates = chartData.dates;
+      const series = dataSeries;
+      const width = chartEl.clientWidth || 900;
+      const height = 300;
+      const pad = { left: 50, right: 20, top: 20, bottom: 40 };
+      const innerW = width - pad.left - pad.right;
+      const innerH = height - pad.top - pad.bottom;
+      const maxY = Math.max(...series.flatMap(s => s.values), 1);
+
+      const svgNS = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(svgNS, "svg");
+      svg.setAttribute("width", width);
+      svg.setAttribute("height", height);
+      svg.style.display = "block";
+
+      function xScale(i) {
+        return pad.left + (innerW * i / Math.max(1, dates.length - 1));
+      }
+      function yScale(v) {
+        return pad.top + innerH - (innerH * v / maxY);
+      }
+
+      const axisX = document.createElementNS(svgNS, "line");
+      axisX.setAttribute("x1", pad.left);
+      axisX.setAttribute("y1", pad.top + innerH);
+      axisX.setAttribute("x2", pad.left + innerW);
+      axisX.setAttribute("y2", pad.top + innerH);
+      axisX.setAttribute("stroke", "var(--border)");
+      svg.appendChild(axisX);
+
+      const axisY = document.createElementNS(svgNS, "line");
+      axisY.setAttribute("x1", pad.left);
+      axisY.setAttribute("y1", pad.top);
+      axisY.setAttribute("x2", pad.left);
+      axisY.setAttribute("y2", pad.top + innerH);
+      axisY.setAttribute("stroke", "var(--border)");
+      svg.appendChild(axisY);
+
+      dates.forEach((d, i) => {
+        if (i % Math.ceil(dates.length / 6) !== 0) return;
+        const txt = document.createElementNS(svgNS, "text");
+        txt.setAttribute("x", xScale(i));
+        txt.setAttribute("y", pad.top + innerH + 18);
+        txt.setAttribute("fill", "#94a3b8");
+        txt.setAttribute("font-size", "10");
+        txt.setAttribute("text-anchor", "middle");
+        txt.textContent = d;
+        svg.appendChild(txt);
+      });
+
+      series.forEach(s => {
+        const path = document.createElementNS(svgNS, "path");
+        const points = s.values.map((v, i) => `${xScale(i)},${yScale(v)}`).join(" ");
+        path.setAttribute("d", "M " + points.replace(/ /g, " L "));
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", s.color || "var(--accent)");
+        path.setAttribute("stroke-width", "2");
+        svg.appendChild(path);
+
+        s.values.forEach((v, i) => {
+          if (!v) return;
+          const dot = document.createElementNS(svgNS, "circle");
+          dot.setAttribute("cx", xScale(i));
+          dot.setAttribute("cy", yScale(v));
+          dot.setAttribute("r", "3");
+          dot.setAttribute("fill", s.color || "var(--accent)");
+          svg.appendChild(dot);
+
+          const label = document.createElementNS(svgNS, "text");
+          label.setAttribute("x", xScale(i));
+          label.setAttribute("y", yScale(v) - 8);
+          label.setAttribute("fill", "#e2e8f0");
+          label.setAttribute("font-size", "10");
+          label.setAttribute("text-anchor", "middle");
+          label.textContent = v;
+          svg.appendChild(label);
+        });
+      });
+
+      chartEl.innerHTML = "";
+      chartEl.appendChild(svg);
+    }
+
+    renderChart(document.getElementById("chartQty"), chartData.series_qty);
+    renderChart(document.getElementById("chartSum"), chartData.series_sum);
+  })();
+</script>
+{% endblock %}

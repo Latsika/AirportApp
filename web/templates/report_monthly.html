@@ -1,0 +1,210 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 1100px; }
+  .title { text-align:center; font-size:36px; font-weight:1000; margin:0 0 14px; letter-spacing:.6px; }
+  .menu { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px; padding:12px; border-radius:16px; background:var(--bg-1); border:1px solid var(--border); }
+  .menu a { width:100%; margin:0; padding:12px 14px; border-radius:14px; border:1px solid var(--border); background:var(--bg-2); color:var(--text); font-weight:900; cursor:pointer; text-decoration:none; text-align:left; display:block; }
+  .menu a:hover { background:var(--bg-0); text-decoration:none; }
+  .menu a.active { border-color:#38bdf8; box-shadow:0 0 0 2px rgba(56,189,248,.2); }
+  .card { padding:16px; border-radius:18px; background:var(--bg-1); border:1px solid var(--border); margin-top:12px; }
+  .muted { opacity:.85; font-size:12px; }
+  table { width:100%; border-collapse:collapse; border-radius:14px; overflow:hidden; border:1px solid var(--border); background:var(--bg-1); margin-top:8px; }
+  .totals-strong { font-size: 15px; font-weight: 900; }
+  .totals-grid { display:grid; grid-template-columns: repeat(3, minmax(140px, 1fr)); gap:10px; margin-top:8px; }
+  .totals-card { border:2px solid var(--border); background:var(--bg-2); border-radius:14px; padding:12px; text-align:center; }
+  @media (max-width: 700px) { .totals-grid { grid-template-columns: 1fr; } }
+  .month-input { max-width: 220px; }
+  input[type="month"] { color-scheme: dark; }
+  th, td { padding:12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { font-weight:900; opacity:.95; }
+  tr:last-child td { border-bottom:none; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .actions.between { justify-content: space-between; align-items:center; }
+  .btn-action {
+    padding:6px 10px;
+    font-size:12px;
+    border-radius:999px;
+    width:120px;
+    text-align:center;
+    
+    
+    
+    text-decoration:none;
+    display:inline-block;
+    margin-bottom:0;
+  }
+  .btn-export { padding:6px 10px; font-size:12px; border-radius:999px; width:120px; text-align:center; display:inline-block; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2 class="title">Monthly Report</h2>
+
+<div class="menu">
+  <a href="{{ url_for('sales') }}">Sale</a>
+  <a href="{{ url_for('sale_new') }}">New Sale</a>
+  <a href="{{ url_for('sales_list') }}">Sales List</a>
+  <a class="active" href="{{ url_for('reports') }}">Reports</a>
+</div>
+
+<div class="card">
+  <form method="get" action="{{ url_for('reports_monthly') }}">
+    <label class="muted">Month</label>
+    <input class="month-input" type="month" name="month" value="{{ month_str }}">
+    <div class="actions between" style="margin-top:10px;">
+      <button type="submit">Load</button>
+      <div style="margin-left:auto;">
+        <button class="btn-action" style="  " type="submit" formaction="{{ url_for('reports_monthly_export') }}" name="format" value="pdf">SAVE</button>
+      </div>
+    </div>
+  </form>
+  <div class="actions" style="margin-top:10px;">
+    <a class="btn-action" style="  " href="{{ url_for('reports_monthly_export', month=month_str, format='csv') }}">Export .csv</a>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Airline Fees</h3>
+  <table>
+    <thead><tr><th>Airline</th><th>Destination</th><th>Item Key</th><th>Item Name</th><th>Qty</th><th>Total</th><th>Cash</th><th>Card</th></tr></thead>
+    <tbody>
+    {% for r in airline_items %}
+      <tr>
+        <td>{{ r.name }}{% if r.code %} ({{ r.code }}){% endif %}</td>
+        <td>
+          {% if r.destination_name and r.destination_code %}
+            {{ r.destination_name }} ({{ r.destination_code }})
+          {% elif r.destination_name %}
+            {{ r.destination_name }}
+          {% elif r.destination_code %}
+            {{ r.destination_code }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>{{ r.fee_key }}</td>
+        <td>{{ r.fee_name }}</td>
+        <td>{{ r.qty }}</td>
+        <td>{{ r.total }}</td>
+        <td>{{ r.cash_total }}</td>
+        <td>{{ r.card_total }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <h4>Totals by Airline</h4>
+  <table>
+    <thead><tr><th>Airline</th><th>Total</th><th>Cash</th><th>Card</th></tr></thead>
+    <tbody>
+    {% for r in airline_totals %}
+      <tr>
+        <td>{{ r.name }}{% if r.code %} ({{ r.code }}){% endif %}</td>
+        <td>{{ r.total }}</td>
+        <td>{{ r.cash_total }}</td>
+        <td>{{ r.card_total }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="card" style="margin-top:10px;">
+    <div class="muted" style="font-weight:900; margin-bottom:6px;">Airline Fees Total (All)</div>
+    <div class="totals-grid">
+      <div class="totals-card">
+        <div class="muted" style="font-weight:900; margin-bottom:6px;">Total</div>
+        <div class="totals-strong">{{ airline_all.total }}</div>
+      </div>
+      <div class="totals-card">
+        <div class="muted" style="font-weight:900; margin-bottom:6px;">Card</div>
+        <div class="totals-strong">{{ airline_all.card_total }}</div>
+      </div>
+      <div class="totals-card">
+        <div class="muted" style="font-weight:900; margin-bottom:6px;">Cash</div>
+        <div class="totals-strong">{{ airline_all.cash_total }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Airport Service Fees</h3>
+  <table>
+    <thead><tr><th>Airline</th><th>Destination</th><th>Item Key</th><th>Item Name</th><th>Qty</th><th>Total</th><th>Cash</th><th>Card</th></tr></thead>
+    <tbody>
+    {% for r in airport_items %}
+      <tr>
+        <td>{{ r.name }}{% if r.code %} ({{ r.code }}){% endif %}</td>
+        <td>
+          {% if r.destination_name and r.destination_code %}
+            {{ r.destination_name }} ({{ r.destination_code }})
+          {% elif r.destination_name %}
+            {{ r.destination_name }}
+          {% elif r.destination_code %}
+            {{ r.destination_code }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>{{ r.fee_key }}</td>
+        <td>{{ r.fee_name }}</td>
+        <td>{{ r.qty }}</td>
+        <td>{{ r.total }}</td>
+        <td>{{ r.cash_total }}</td>
+        <td>{{ r.card_total }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <h4>Totals by Airline</h4>
+  <table>
+    <thead><tr><th>Airline</th><th>Total</th><th>Cash</th><th>Card</th></tr></thead>
+    <tbody>
+    {% for r in airport_totals %}
+      <tr>
+        <td>{{ r.name }}{% if r.code %} ({{ r.code }}){% endif %}</td>
+        <td>{{ r.total }}</td>
+        <td>{{ r.cash_total }}</td>
+        <td>{{ r.card_total }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="card" style="margin-top:10px;">
+    <div class="muted" style="font-weight:900; margin-bottom:6px;">Airport Fees Total (All)</div>
+    <div class="totals-grid">
+      <div class="totals-card">
+        <div class="muted" style="font-weight:900; margin-bottom:6px;">Total</div>
+        <div class="totals-strong">{{ airport_all.total }}</div>
+      </div>
+      <div class="totals-card">
+        <div class="muted" style="font-weight:900; margin-bottom:6px;">Card</div>
+        <div class="totals-strong">{{ airport_all.card_total }}</div>
+      </div>
+      <div class="totals-card">
+        <div class="muted" style="font-weight:900; margin-bottom:6px;">Cash</div>
+        <div class="totals-strong">{{ airport_all.cash_total }}</div>
+      </div>
+    </div>
+  </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <div class="muted" style="font-weight:900; margin-bottom:6px;">All Fees | Total</div>
+  <div class="totals-grid">
+    <div class="totals-card">
+      <div class="muted" style="font-weight:900; margin-bottom:6px;">Total</div>
+      <div class="totals-strong">{{ combined_all.total }}</div>
+    </div>
+    <div class="totals-card">
+      <div class="muted" style="font-weight:900; margin-bottom:6px;">Card</div>
+      <div class="totals-strong">{{ combined_all.card_total }}</div>
+    </div>
+    <div class="totals-card">
+      <div class="muted" style="font-weight:900; margin-bottom:6px;">Cash</div>
+      <div class="totals-strong">{{ combined_all.cash_total }}</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
