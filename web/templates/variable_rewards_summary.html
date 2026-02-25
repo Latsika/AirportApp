@@ -6,6 +6,11 @@
   body { padding: 0; }
   .app-shell { max-width: none; }
   .container { width: 100vw; max-width: 100vw; border-radius: 0; }
+  .btn-print-pdf {
+    font-size: 12px !important;
+    padding: 6px 10px !important;
+    line-height: 1.1;
+  }
   @media (max-width: 700px) {
     .container { padding: 20px; }
   }
@@ -78,7 +83,7 @@
             <td style="padding:12px; border-bottom:1px solid var(--border);">{{ r.role }}</td>
             <td style="padding:12px; border-bottom:1px solid var(--border);">{{ "%.2f"|format(r.computed_amount or 0) }} EUR</td>
             <td style="padding:12px; border-bottom:1px solid var(--border);">
-              <a class="btn-small" href="{{ url_for('variable_rewards_summary_print_user', user_id=r.id, year=year, month_from=month_from, month_to=month_to) }}">Print PDF</a>
+              <a class="btn-small btn-print-pdf" href="{{ url_for('variable_rewards_summary_print_user', user_id=r.id, year=year, month_from=month_from, month_to=month_to) }}">Print PDF</a>
             </td>
           </tr>
         {% endfor %}

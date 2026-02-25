@@ -32,3 +32,44 @@
 2026-02-23 20:18:46,291 [INFO] app: App restarted. Sessions will be invalidated.
 2026-02-23 20:51:15,066 [INFO] app: App restarted. Sessions will be invalidated.
 2026-02-23 21:50:48,126 [INFO] app: App restarted. Sessions will be invalidated.
+2026-02-25 12:18:57,222 [INFO] web.app: App restarted. Sessions will be invalidated.
+2026-02-25 12:18:57,375 [ERROR] web.app: Exception on /variable_rewards/print/1 [GET]
+Traceback (most recent call last):
+  File "C:\Users\kocisova\PycharmProjects\PythonProject\AirportApp\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\kocisova\PycharmProjects\PythonProject\AirportApp\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\kocisova\PycharmProjects\PythonProject\AirportApp\.venv\Lib\site-packages\flask\app.py", line 915, in full_dispatch_request
+    rv = self.preprocess_request()
+  File "C:\Users\kocisova\PycharmProjects\PythonProject\AirportApp\.venv\Lib\site-packages\flask\app.py", line 1291, in preprocess_request
+    rv = self.ensure_sync(before_func)()
+  File "C:\Users\kocisova\PycharmProjects\PythonProject\AirportApp\web\app.py", line 1746, in enforce_session_timeout_and_single_user
+    log_auth_event(
+    ~~~~~~~~~~~~~~^
+        user_id=session.get("user_id"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        details="Application restarted. Session invalidated.",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\kocisova\PycharmProjects\PythonProject\AirportApp\database\db.py", line 1228, in log_auth_event
+    cur.execute(
+    ~~~~~~~~~~~^
+        """
+        ^^^
+    ...<17 lines>...
+        ),
+        ^^
+    )
+    ^
+sqlite3.IntegrityError: FOREIGN KEY constraint failed
+2026-02-25 12:19:29,194 [INFO] web.app: App restarted. Sessions will be invalidated.
+2026-02-25 12:20:41,695 [INFO] web.app: App restarted. Sessions will be invalidated.
+2026-02-25 12:20:51,184 [INFO] web.app: App restarted. Sessions will be invalidated.
+2026-02-25 12:21:00,846 [INFO] web.app: App restarted. Sessions will be invalidated.
+2026-02-25 12:21:27,940 [INFO] web.app: App restarted. Sessions will be invalidated.
+2026-02-25 12:31:34,453 [INFO] app: App restarted. Sessions will be invalidated.
+2026-02-25 12:49:02,924 [INFO] app: App restarted. Sessions will be invalidated.
+2026-02-25 13:00:09,493 [INFO] web.app: App restarted. Sessions will be invalidated.
+2026-02-25 13:00:32,779 [INFO] web.app: App restarted. Sessions will be invalidated.

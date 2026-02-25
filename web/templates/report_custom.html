@@ -215,6 +215,7 @@
       <thead>
         <tr>
           <th>Date</th>
+          <th>Destination</th>
           <th>PNR</th>
           <th>Passenger Name</th>
           <th>Airline Fee</th>
@@ -226,6 +227,7 @@
       {% for r in airline_detail_rows %}
         <tr>
           <td>{{ r.sold_date or "-" }}</td>
+          <td>{{ r.destination_code or "-" }}</td>
           <td>{{ r.pnr or "-" }}</td>
           <td>{{ r.passenger_name or "-" }}</td>
           <td>{{ r.fee_name or "-" }}</td>

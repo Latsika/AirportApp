@@ -621,6 +621,7 @@ def _custom_report_airline_detail_rows(filters: dict):
             date(s.sold_at_utc) AS sold_date,
             s.pnr,
             s.passenger_name,
+            COALESCE(d.dest_code, '') AS destination_code,
             CASE
                 WHEN si.fee_source = 'ticket' THEN COALESCE(si.fee_name, 'Plane Ticket')
                 ELSE COALESCE(af.fee_name, si.fee_name, si.fee_key)
@@ -629,6 +630,7 @@ def _custom_report_airline_detail_rows(filters: dict):
             s.payment_method
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
+        LEFT JOIN airline_destinations d ON d.id = s.destination_id
         LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
         WHERE {" AND ".join(where)}
         ORDER BY s.sold_at_utc DESC, fee_name COLLATE NOCASE ASC
@@ -897,12 +899,13 @@ def _custom_report_to_pdf(title: str, rows, chart_data, date_from: str, date_to:
                 page_width * 0.11,
             ]
             elements.append(make_table([header_row] + data_rows, col_widths))
-        elif header_row == ["Date", "PNR", "Passenger Name", "Airline Fee", "Amount", "Payment"]:
+        elif header_row == ["Date", "Destination", "PNR", "Passenger Name", "Airline Fee", "Amount", "Payment"]:
             col_widths = [
-                page_width * 0.14,
-                page_width * 0.13,
-                page_width * 0.22,
-                page_width * 0.31,
+                page_width * 0.12,
+                page_width * 0.10,
+                page_width * 0.11,
+                page_width * 0.20,
+                page_width * 0.27,
                 page_width * 0.10,
                 page_width * 0.10,
             ]
@@ -1288,6 +1291,49 @@ def _send_notification_email(subject: str, body: str, recipients: list[str]) -> 
         smtp.send_message(msg)
 
 
+def _send_notification_email_with_attachment(
+    subject: str,
+    body: str,
+    recipients: list[str],
+    *,
+    attachment_name: str,
+    attachment_bytes: bytes,
+    mime_type: str = "application/pdf",
+) -> None:
+    host = (get_app_state("smtp_host") or os.environ.get("SMTP_HOST", "")).strip()
+    if not host or not recipients:
+        return
+    port_raw = (get_app_state("smtp_port") or os.environ.get("SMTP_PORT", "587")).strip()
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 587
+    user = (get_app_state("smtp_user") or os.environ.get("SMTP_USER", "")).strip()
+    password = (get_app_state("smtp_password") or os.environ.get("SMTP_PASSWORD", "")).strip()
+    sender = (get_app_state("smtp_sender") or os.environ.get("SMTP_SENDER", user or "no-reply@airportapp.local")).strip()
+    use_tls = (get_app_state("smtp_tls") or "1") != "0"
+
+    maintype, subtype = mime_type.split("/", 1) if "/" in mime_type else ("application", "octet-stream")
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = ", ".join(recipients)
+    msg.set_content(body)
+    msg.add_attachment(
+        attachment_bytes,
+        maintype=maintype,
+        subtype=subtype,
+        filename=attachment_name,
+    )
+
+    with smtplib.SMTP(host, port, timeout=10) as smtp:
+        if use_tls:
+            smtp.starttls()
+        if user and password:
+            smtp.login(user, password)
+        smtp.send_message(msg)
+
+
 def _log_notification(
     template_id: int | None,
     event_key: str,
@@ -1380,8 +1426,15 @@ def _report_snapshot_exists(report_type: str, date_key: str) -> bool:
         return cur.fetchone() is not None
 
 
+def _local_notification_tz():
+    try:
+        return ZoneInfo("Europe/Bratislava")
+    except Exception:
+        return datetime.now().astimezone().tzinfo or timezone.utc
+
+
 def _run_notification_checks() -> None:
-    tz = ZoneInfo("Europe/Bratislava")
+    tz = _local_notification_tz()
     now_local = datetime.now(tz)
     last_run_raw = get_app_state("notifications_last_check_ts")
     try:
@@ -1421,6 +1474,126 @@ def _run_notification_checks() -> None:
                     {"ReportMonth": _format_month_label(m_key)},
                 )
             set_app_state("notifications_monthly_not_created_last", m_key)
+
+
+def _iter_month_keys(start_key: str, end_key: str):
+    try:
+        cur = datetime.strptime(start_key, "%Y-%m")
+        end = datetime.strptime(end_key, "%Y-%m")
+    except ValueError:
+        return
+    cur = cur.replace(day=1)
+    end = end.replace(day=1)
+    while cur <= end:
+        yield cur.strftime("%Y-%m")
+        if cur.month == 12:
+            cur = cur.replace(year=cur.year + 1, month=1)
+        else:
+            cur = cur.replace(month=cur.month + 1)
+
+
+def _send_auto_daily_report_email(date_key: str, recipients: list[str]) -> None:
+    data = cast(dict[str, Any], _build_report_payload(date_key, is_month=False))
+    rows = _build_standard_report_rows(data, date_key, label="Daily")
+    content = _report_to_pdf(f"Daily Report {date_key}", rows)
+    _send_notification_email_with_attachment(
+        subject=f"Daily report {date_key}",
+        body=f"Automatic daily report for {date_key}.",
+        recipients=recipients,
+        attachment_name=f"[DAILY REPORT] {date_key}.pdf",
+        attachment_bytes=content,
+    )
+
+
+def _send_auto_monthly_report_email(month_key: str, recipients: list[str]) -> None:
+    data = cast(dict[str, Any], _build_report_payload(month_key, is_month=True))
+    rows = _build_standard_report_rows(data, month_key, label="Monthly")
+    content = _report_to_pdf(f"Monthly Report {month_key}", rows)
+    _send_notification_email_with_attachment(
+        subject=f"Monthly report {_format_month_label(month_key)}",
+        body=f"Automatic monthly report for {_format_month_label(month_key)}.",
+        recipients=recipients,
+        attachment_name=f"[MONTHLY REPORT] {month_key}.pdf",
+        attachment_bytes=content,
+    )
+
+
+def _run_auto_report_email_scheduler() -> None:
+    tz = _local_notification_tz()
+    now_local = datetime.now(tz)
+
+    # Trigger after 00:05 local time (or later), plus catch-up after restarts.
+    if now_local.hour == 0 and now_local.minute < 5:
+        return
+
+    last_run_raw = get_app_state("auto_report_email_last_run_ts")
+    try:
+        last_run = int(last_run_raw) if last_run_raw else 0
+    except ValueError:
+        last_run = 0
+    if int(time.time()) - last_run < 300:
+        return
+    set_app_state("auto_report_email_last_run_ts", str(int(time.time())))
+
+    recipients = _notification_recipients()
+    if not recipients:
+        return
+
+    today = now_local.date()
+    yesterday = today - timedelta(days=1)
+
+    # Daily catch-up: send all missing days from last sent marker to yesterday.
+    daily_last_sent_raw = get_app_state("auto_daily_report_last_sent") or ""
+    try:
+        daily_start = (
+            datetime.strptime(daily_last_sent_raw, "%Y-%m-%d").date() + timedelta(days=1)
+            if daily_last_sent_raw
+            else yesterday
+        )
+    except ValueError:
+        daily_start = yesterday
+
+    if daily_start <= yesterday:
+        cur_day = daily_start
+        while cur_day <= yesterday:
+            key = cur_day.isoformat()
+            if not _report_snapshot_exists("daily_auto_email", key):
+                try:
+                    _send_auto_daily_report_email(key, recipients)
+                    _log_report_snapshot("daily_auto_email", key, None)
+                    set_app_state("auto_daily_report_last_sent", key)
+                except Exception:
+                    pass
+            else:
+                set_app_state("auto_daily_report_last_sent", key)
+            cur_day += timedelta(days=1)
+
+    # Monthly catch-up: send missing months up to previous month.
+    prev_month_date = today.replace(day=1) - timedelta(days=1)
+    prev_month_key = prev_month_date.strftime("%Y-%m")
+    monthly_last_sent_raw = get_app_state("auto_monthly_report_last_sent") or ""
+    if monthly_last_sent_raw:
+        try:
+            start_dt = datetime.strptime(monthly_last_sent_raw, "%Y-%m")
+            if start_dt.month == 12:
+                monthly_start_key = start_dt.replace(year=start_dt.year + 1, month=1).strftime("%Y-%m")
+            else:
+                monthly_start_key = start_dt.replace(month=start_dt.month + 1).strftime("%Y-%m")
+        except ValueError:
+            monthly_start_key = prev_month_key
+    else:
+        monthly_start_key = prev_month_key
+
+    for m_key in _iter_month_keys(monthly_start_key, prev_month_key) or []:
+        if not _report_snapshot_exists("monthly_auto_email", m_key):
+            try:
+                _send_auto_monthly_report_email(m_key, recipients)
+                _log_report_snapshot("monthly_auto_email", m_key, None)
+                set_app_state("auto_monthly_report_last_sent", m_key)
+            except Exception:
+                pass
+        else:
+            set_app_state("auto_monthly_report_last_sent", m_key)
 
 
 def _compute_variable_rewards_distribution(year: int, month: int):
@@ -1724,6 +1897,10 @@ def enforce_session_timeout_and_single_user():
 
     try:
         _run_notification_checks()
+    except Exception:
+        pass
+    try:
+        _run_auto_report_email_scheduler()
     except Exception:
         pass
 
@@ -3185,28 +3362,8 @@ def _report_to_pdf(title: str, rows):
     return buffer.getvalue()
 
 
-def _export_report(date_filter: str, is_month: bool, fmt: str):
-    data = cast(dict[str, Any], _build_report_payload(date_filter, is_month))
+def _build_standard_report_rows(data: dict[str, Any], date_filter: str, *, label: str):
     rows = []
-    label = "Monthly" if is_month else "Daily"
-    report_type = "monthly" if is_month else "daily"
-    date_key = date_filter
-    _log_report_snapshot(report_type, date_key, session.get("user_id"))
-    try:
-        user_name = session.get("fullname") or session.get("nickname") or "User"
-        if is_month:
-            send_notification(
-                "monthly_report_created",
-                {"UserName": user_name, "ReportMonth": _format_month_label(date_key)},
-            )
-        else:
-            send_notification(
-                "daily_report_created",
-                {"UserName": user_name, "ReportDate": date_key},
-            )
-    except Exception:
-        pass
-
     def _destination_label(row):
         keys = row.keys() if hasattr(row, "keys") else []
         name = (row["destination_name"] or "").strip() if "destination_name" in keys else ""
@@ -3278,6 +3435,30 @@ def _export_report(date_filter: str, is_month: bool, fmt: str):
     rows.append(["All Fees Total"])
     rows.append(["Total", "Cash", "Card"])
     rows.append([data["combined_all"]["total"], data["combined_all"]["cash_total"], data["combined_all"]["card_total"]])
+    return rows
+
+
+def _export_report(date_filter: str, is_month: bool, fmt: str):
+    data = cast(dict[str, Any], _build_report_payload(date_filter, is_month))
+    label = "Monthly" if is_month else "Daily"
+    rows = _build_standard_report_rows(data, date_filter, label=label)
+    report_type = "monthly" if is_month else "daily"
+    date_key = date_filter
+    _log_report_snapshot(report_type, date_key, session.get("user_id"))
+    try:
+        user_name = session.get("fullname") or session.get("nickname") or "User"
+        if is_month:
+            send_notification(
+                "monthly_report_created",
+                {"UserName": user_name, "ReportMonth": _format_month_label(date_key)},
+            )
+        else:
+            send_notification(
+                "daily_report_created",
+                {"UserName": user_name, "ReportDate": date_key},
+            )
+    except Exception:
+        pass
 
     if fmt == "csv":
         content = _report_to_csv(rows)
@@ -3371,11 +3552,12 @@ def reports_custom_export():
     rows.append([])
     if filters["include_airline"]:
         rows.append(["Airline Detail Report"])
-        rows.append(["Date", "PNR", "Passenger Name", "Airline Fee", "Amount", "Payment"])
+        rows.append(["Date", "Destination", "PNR", "Passenger Name", "Airline Fee", "Amount", "Payment"])
         for r in airline_detail_rows:
             rows.append(
                 [
                     r["sold_date"] or "",
+                    r["destination_code"] or "",
                     r["pnr"] or "",
                     r["passenger_name"] or "",
                     r["fee_name"] or "",
@@ -3456,13 +3638,14 @@ def reports_custom_export():
 
     if fmt.lower() == "csv":
         flat_rows = []
-        flat_rows.append(["Section", "Date", "PNR", "Passenger Name", "Airline Fee", "Amount", "Payment"])
+        flat_rows.append(["Section", "Date", "Destination", "PNR", "Passenger Name", "Airline Fee", "Amount", "Payment"])
         if filters["include_airline"]:
             for r in airline_detail_rows:
                 flat_rows.append(
                     [
                         "Airline Detail",
                         r["sold_date"] or "",
+                        r["destination_code"] or "",
                         r["pnr"] or "",
                         r["passenger_name"] or "",
                         r["fee_name"] or "",
@@ -3470,10 +3653,10 @@ def reports_custom_export():
                         r["payment_method"] or "",
                     ]
                 )
-            flat_rows.append(["Airline Fee Totals", "", "", "", "", "", ""])
+            flat_rows.append(["Airline Fee Totals", "", "", "", "", "", "", ""])
             for t in airline_fee_totals:
-                flat_rows.append(["Airline Fee", "", "", "", t["fee_name"], t["total"], ""])
-            flat_rows.append(["Grand Total", "", "", "", "", airline_fee_grand_total, ""])
+                flat_rows.append(["Airline Fee", "", "", "", "", t["fee_name"], t["total"], ""])
+            flat_rows.append(["Grand Total", "", "", "", "", "", airline_fee_grand_total, ""])
 
         flat_rows.append([])
         flat_rows.append(
