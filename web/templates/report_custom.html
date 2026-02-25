@@ -403,7 +403,7 @@
     </div>
   {% endif %}
 
-  {% if airline_items_summary or airport_items_summary %}
+  {% if show_combined_total %}
     <div class="card" style="margin-top:12px;">
       <div class="muted" style="font-weight:900; margin-bottom:6px;">All Fees | Total</div>
       <div class="totals-grid">
@@ -421,7 +421,7 @@
         </div>
       </div>
     </div>
-  {% else %}
+  {% elif not airline_items_summary and not airport_items_summary %}
     <p class="muted" style="margin-top:10px;">Hladane data neexistuju pre zvolene filtre.</p>
   {% endif %}
 </div>

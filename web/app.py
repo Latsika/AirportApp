@@ -2854,6 +2854,7 @@ def reports_custom():
         "cash_total": airline_all["cash_total"] + airport_all["cash_total"],
         "card_total": airline_all["card_total"] + airport_all["card_total"],
     }
+    show_combined_total = bool(filters["include_airline"] and filters["include_airport"])
     airline_detail_rows = (
         _custom_report_airline_detail_rows(filters) if filters["include_airline"] else []
     )
@@ -2996,6 +2997,7 @@ def reports_custom():
         airline_all=airline_all,
         airport_all=airport_all,
         combined_all=combined,
+        show_combined_total=show_combined_total,
         airline_detail_rows=airline_detail_rows,
         airline_fee_totals=airline_fee_totals,
         airline_fee_grand_total=airline_fee_grand_total,
@@ -3447,9 +3449,10 @@ def reports_custom_export():
         rows.append([airport_all["total"], airport_all["cash_total"], airport_all["card_total"]])
         rows.append([])
 
-    rows.append(["All Fees Total"])
-    rows.append(["Total", "Cash", "Card"])
-    rows.append([combined["total"], combined["cash_total"], combined["card_total"]])
+    if filters["include_airline"] and filters["include_airport"]:
+        rows.append(["All Fees Total"])
+        rows.append(["Total", "Cash", "Card"])
+        rows.append([combined["total"], combined["cash_total"], combined["card_total"]])
 
     if fmt.lower() == "csv":
         flat_rows = []
