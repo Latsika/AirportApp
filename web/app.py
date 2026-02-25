@@ -563,7 +563,8 @@ def _build_custom_report(filters: dict):
             return code
         return ""
 
-    series = {}
+    series_qty = {}
+    series_sum = {}
     for r in rows:
         date_key = (r["sold_at_utc"] or "")[:10]
         if not date_key:
@@ -587,16 +588,71 @@ def _build_custom_report(filters: dict):
             series_key = r["fee_name"] or "Item"
         if dest_label and filters.get("destination_ids"):
             series_key = f"{series_key} @ {dest_label}"
-        if series_key not in series:
-            series[series_key] = {k: 0 for k in date_list}
-        series[series_key][date_key] = series[series_key].get(date_key, 0) + int(r["quantity"] or 0)
+        if series_key not in series_qty:
+            series_qty[series_key] = {k: 0 for k in date_list}
+            series_sum[series_key] = {k: 0.0 for k in date_list}
+        series_qty[series_key][date_key] = series_qty[series_key].get(date_key, 0) + int(r["quantity"] or 0)
+        series_sum[series_key][date_key] = series_sum[series_key].get(date_key, 0.0) + float(r["total_amount"] or 0)
 
-    series_list = []
-    for k, v in series.items():
-        series_list.append({"label": k, "values": [v.get(d, 0) for d in date_list]})
+    series_qty_list = []
+    series_sum_list = []
+    for k, v in series_qty.items():
+        series_qty_list.append({"label": k, "values": [v.get(d, 0) for d in date_list]})
+    for k, v in series_sum.items():
+        series_sum_list.append({"label": k, "values": [v.get(d, 0.0) for d in date_list]})
 
-    chart_payload = {"dates": date_list, "series": series_list}
+    chart_payload = {"dates": date_list, "series_qty": series_qty_list, "series_sum": series_sum_list}
     return rows, chart_payload
+
+
+def _custom_report_airline_detail_rows(filters: dict):
+    where, params = _custom_report_where(filters)
+    if where is None:
+        return []
+
+    where = list(where)
+    params = list(params)
+    if filters.get("include_ticket"):
+        where.append("(si.fee_source = 'airline' OR si.fee_source = 'ticket')")
+    else:
+        where.append("si.fee_source = 'airline'")
+
+    sql = f"""
+        SELECT
+            date(s.sold_at_utc) AS sold_date,
+            s.pnr,
+            s.passenger_name,
+            CASE
+                WHEN si.fee_source = 'ticket' THEN COALESCE(si.fee_name, 'Plane Ticket')
+                ELSE COALESCE(af.fee_name, si.fee_name, si.fee_key)
+            END AS fee_name,
+            si.total_amount,
+            s.payment_method
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
+        WHERE {" AND ".join(where)}
+        ORDER BY s.sold_at_utc DESC, fee_name COLLATE NOCASE ASC
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        return cur.fetchall()
+
+
+def _custom_report_fee_totals(rows):
+    totals = {}
+    grand_total = 0.0
+    for row in rows:
+        fee_name = (row["fee_name"] or "").strip() or "Unknown"
+        amount = float(row["total_amount"] or 0.0)
+        totals[fee_name] = totals.get(fee_name, 0.0) + amount
+        grand_total += amount
+    total_rows = [
+        {"fee_name": fee_name, "total": round(total, 4)}
+        for fee_name, total in sorted(totals.items(), key=lambda item: item[0].lower())
+    ]
+    return total_rows, round(grand_total, 4)
 
 
 def _custom_report_items_by_source(filters: dict, source: str):
@@ -842,6 +898,19 @@ def _custom_report_to_pdf(title: str, rows, chart_data, date_from: str, date_to:
                 page_width * 0.11,
             ]
             elements.append(make_table([header_row] + data_rows, col_widths))
+        elif header_row == ["Date", "PNR", "Passenger Name", "Airline Fee", "Amount", "Payment"]:
+            col_widths = [
+                page_width * 0.14,
+                page_width * 0.13,
+                page_width * 0.22,
+                page_width * 0.31,
+                page_width * 0.10,
+                page_width * 0.10,
+            ]
+            elements.append(make_table([header_row] + data_rows, col_widths))
+        elif header_row == ["Airline Fee", "Total"]:
+            col_widths = [page_width * 0.8, page_width * 0.2]
+            elements.append(make_table([header_row] + data_rows, col_widths))
         elif header_row == ["Airline", "Total", "Cash", "Card"]:
             col_widths = [
                 page_width * 0.46,
@@ -859,7 +928,9 @@ def _custom_report_to_pdf(title: str, rows, chart_data, date_from: str, date_to:
             elements.append(make_table(table_rows, col_widths))
         elements.append(Spacer(1, 10))
 
-    if chart_data and chart_data.get("series"):
+    def _render_chart_block(series, label_text, value_format):
+        if not series:
+            return
         elements.append(PageBreak())
         elements.append(Paragraph(f"Chart ({date_from} to {date_to})", section_style))
         from reportlab.graphics.charts.lineplots import LinePlot
@@ -872,7 +943,7 @@ def _custom_report_to_pdf(title: str, rows, chart_data, date_from: str, date_to:
         chart.width = doc.width - 80
 
         dates = chart_data.get("dates", [])
-        series = chart_data.get("series", [])[:6]
+        series = series[:6]
         chart.data = [
             [(i, v) for i, v in enumerate(s["values"])]
             for s in series
@@ -899,9 +970,37 @@ def _custom_report_to_pdf(title: str, rows, chart_data, date_from: str, date_to:
             chart.lines[idx].strokeWidth = 2
 
         drawing.add(chart)
+
+        # data labels for each point
+        label_step = 1
+        if len(dates) > 31:
+            label_step = 7 if len(dates) <= 90 else 14
+        max_y = chart.yValueAxis.valueMax or 1
+        for s_idx, s in enumerate(series):
+            values = s["values"]
+            for i, v in enumerate(values):
+                if i % label_step != 0:
+                    continue
+                if len(dates) <= 1:
+                    x = chart.x + chart.width / 2
+                else:
+                    x = chart.x + (i / (len(dates) - 1)) * chart.width
+                y = chart.y + (float(v) / max_y) * chart.height if max_y else chart.y
+                offset = 6 + (s_idx % 2) * 8
+                y_pos = y + offset
+                if y_pos > chart.y + chart.height - 2:
+                    y_pos = y - offset
+                if y_pos < chart.y + 2:
+                    y_pos = chart.y + 2
+                lbl = Label()
+                lbl.setOrigin(x, y_pos)
+                lbl.setText(value_format(v))
+                lbl.fontSize = 7
+                drawing.add(lbl)
+
         label = Label()
         label.setOrigin(40, 320)
-        label.setText("Quantity by date (up to 6 series)")
+        label.setText(label_text)
         label.fontSize = 9
         drawing.add(label)
         elements.append(cast(Flowable, drawing))
@@ -929,6 +1028,18 @@ def _custom_report_to_pdf(title: str, rows, chart_data, date_from: str, date_to:
                 )
             )
         elements.append(legend)
+
+    if chart_data:
+        _render_chart_block(
+            chart_data.get("series_qty", []),
+            "Quantity by date (up to 6 series)",
+            lambda v: f"{int(v)}",
+        )
+        _render_chart_block(
+            chart_data.get("series_sum", []),
+            "Amount by date (up to 6 series)",
+            lambda v: f"{float(v):.2f}",
+        )
 
     doc.build(elements)
     return buffer.getvalue()
@@ -2712,7 +2823,9 @@ def reports_custom():
         "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6",
         "#14b8a6", "#f97316", "#22c55e", "#eab308", "#06b6d4",
     ]
-    for idx, s in enumerate(chart_data.get("series", [])):
+    for idx, s in enumerate(chart_data.get("series_qty", [])):
+        s["color"] = palette[idx % len(palette)]
+    for idx, s in enumerate(chart_data.get("series_sum", [])):
         s["color"] = palette[idx % len(palette)]
 
     airline_items_summary = (
@@ -2742,6 +2855,10 @@ def reports_custom():
         "cash_total": airline_all["cash_total"] + airport_all["cash_total"],
         "card_total": airline_all["card_total"] + airport_all["card_total"],
     }
+    airline_detail_rows = (
+        _custom_report_airline_detail_rows(filters) if filters["include_airline"] else []
+    )
+    airline_fee_totals, airline_fee_grand_total = _custom_report_fee_totals(airline_detail_rows)
 
     airlines_by_id = {str(a["id"]): a for a in airlines}
     destinations_by_id = {str(d["id"]): d for d in destinations}
@@ -2880,6 +2997,9 @@ def reports_custom():
         airline_all=airline_all,
         airport_all=airport_all,
         combined_all=combined,
+        airline_detail_rows=airline_detail_rows,
+        airline_fee_totals=airline_fee_totals,
+        airline_fee_grand_total=airline_fee_grand_total,
         chart_data=chart_data,
         chart_title=chart_title,
     )
@@ -3226,6 +3346,10 @@ def reports_custom_export():
         "cash_total": airline_all["cash_total"] + airport_all["cash_total"],
         "card_total": airline_all["card_total"] + airport_all["card_total"],
     }
+    airline_detail_rows = (
+        _custom_report_airline_detail_rows(filters) if filters["include_airline"] else []
+    )
+    airline_fee_totals, airline_fee_grand_total = _custom_report_fee_totals(airline_detail_rows)
     _, chart_data = _build_custom_report(filters)
 
     def _destination_label(row):
@@ -3244,6 +3368,28 @@ def reports_custom_export():
     rows = []
     rows.append([f"Custom Report", f"{filters['date_from']} to {filters['date_to']}"])
     rows.append([])
+    if filters["include_airline"]:
+        rows.append(["Airline Detail Report"])
+        rows.append(["Date", "PNR", "Passenger Name", "Airline Fee", "Amount", "Payment"])
+        for r in airline_detail_rows:
+            rows.append(
+                [
+                    r["sold_date"] or "",
+                    r["pnr"] or "",
+                    r["passenger_name"] or "",
+                    r["fee_name"] or "",
+                    r["total_amount"] or 0,
+                    r["payment_method"] or "",
+                ]
+            )
+        rows.append([])
+        rows.append(["Airline Fee Totals"])
+        rows.append(["Airline Fee", "Total"])
+        for t in airline_fee_totals:
+            rows.append([t["fee_name"], t["total"]])
+        rows.append(["Grand Total", airline_fee_grand_total])
+        rows.append([])
+
     if filters["include_airline"]:
         rows.append(["Airline Fees"])
         rows.append(["Airline", "Destination", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"])
@@ -3308,6 +3454,26 @@ def reports_custom_export():
 
     if fmt.lower() == "csv":
         flat_rows = []
+        flat_rows.append(["Section", "Date", "PNR", "Passenger Name", "Airline Fee", "Amount", "Payment"])
+        if filters["include_airline"]:
+            for r in airline_detail_rows:
+                flat_rows.append(
+                    [
+                        "Airline Detail",
+                        r["sold_date"] or "",
+                        r["pnr"] or "",
+                        r["passenger_name"] or "",
+                        r["fee_name"] or "",
+                        r["total_amount"] or 0,
+                        r["payment_method"] or "",
+                    ]
+                )
+            flat_rows.append(["Airline Fee Totals", "", "", "", "", "", ""])
+            for t in airline_fee_totals:
+                flat_rows.append(["Airline Fee", "", "", "", t["fee_name"], t["total"], ""])
+            flat_rows.append(["Grand Total", "", "", "", "", airline_fee_grand_total, ""])
+
+        flat_rows.append([])
         flat_rows.append(
             ["Section", "Airline", "Destination", "Item Key", "Item Name", "Qty", "Total", "Cash", "Card"]
         )
