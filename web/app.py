@@ -300,6 +300,82 @@ def _report_total_all(conn, date_filter: str, is_month: bool, source: str):
     }
 
 
+def _report_ticket_totals_by_airline(conn, date_filter: str, is_month: bool):
+    cur = conn.cursor()
+    if is_month:
+        cur.execute(
+            """
+            SELECT a.id, a.name, a.code,
+                   SUM(si.quantity) AS qty,
+                   SUM(si.total_amount) AS total,
+                   SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
+                   SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            JOIN airlines a ON a.id = s.airline_id
+            WHERE si.fee_source = 'ticket' AND substr(s.sold_at_utc, 1, 7) = ?
+            GROUP BY a.id
+            ORDER BY a.name COLLATE NOCASE ASC
+            """,
+            (date_filter,),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT a.id, a.name, a.code,
+                   SUM(si.quantity) AS qty,
+                   SUM(si.total_amount) AS total,
+                   SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
+                   SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            JOIN airlines a ON a.id = s.airline_id
+            WHERE si.fee_source = 'ticket' AND date(s.sold_at_utc) = ?
+            GROUP BY a.id
+            ORDER BY a.name COLLATE NOCASE ASC
+            """,
+            (date_filter,),
+        )
+    return cur.fetchall()
+
+
+def _report_ticket_total_all(conn, date_filter: str, is_month: bool):
+    cur = conn.cursor()
+    if is_month:
+        cur.execute(
+            """
+            SELECT SUM(si.quantity) AS qty,
+                   SUM(si.total_amount) AS total,
+                   SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
+                   SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            WHERE si.fee_source = 'ticket' AND substr(s.sold_at_utc, 1, 7) = ?
+            """,
+            (date_filter,),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT SUM(si.quantity) AS qty,
+                   SUM(si.total_amount) AS total,
+                   SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
+                   SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            WHERE si.fee_source = 'ticket' AND date(s.sold_at_utc) = ?
+            """,
+            (date_filter,),
+        )
+    row = cur.fetchone()
+    return {
+        "qty": int(row["qty"] or 0),
+        "total": float(row["total"] or 0),
+        "cash_total": float(row["cash_total"] or 0),
+        "card_total": float(row["card_total"] or 0),
+    }
+
+
 def _load_custom_report_filters():
     with get_connection() as conn:
         cur = conn.cursor()
@@ -1055,6 +1131,8 @@ def _build_report_payload(date_filter: str, is_month: bool):
         airport_totals = _report_totals_by_airline(conn, date_filter, is_month, "airport")
         airline_all = _report_total_all(conn, date_filter, is_month, "airline")
         airport_all = _report_total_all(conn, date_filter, is_month, "airport")
+        ticket_totals = _report_ticket_totals_by_airline(conn, date_filter, is_month)
+        ticket_all = _report_ticket_total_all(conn, date_filter, is_month)
         combined = {
             "total": airline_all["total"] + airport_all["total"],
             "cash_total": airline_all["cash_total"] + airport_all["cash_total"],
@@ -1065,8 +1143,10 @@ def _build_report_payload(date_filter: str, is_month: bool):
         "airport_items": airport_items,
         "airline_totals": airline_totals,
         "airport_totals": airport_totals,
+        "ticket_totals": ticket_totals,
         "airline_all": airline_all,
         "airport_all": airport_all,
+        "ticket_all": ticket_all,
         "combined_all": combined,
     }
 
@@ -1788,6 +1868,8 @@ def _sale_snapshot(conn, sale_id: int) -> dict:
             a.code AS airline_code,
             d.dest_name AS destination_name,
             d.dest_code AS destination_code,
+            s.pnr,
+            s.passenger_name,
             s.sold_at_utc,
             s.grand_total AS total_amount,
             s.cash_amount,
@@ -1860,6 +1942,10 @@ def _format_sale_changes(before: dict, after: dict) -> str:
             return code
         return "-"
 
+    def _text_value(value: object) -> str:
+        text = str(value or "").strip()
+        return text if text else "-"
+
     changes = []
 
     if _airline_label(before) != _airline_label(after):
@@ -1867,6 +1953,12 @@ def _format_sale_changes(before: dict, after: dict) -> str:
     if _destination_label(before) != _destination_label(after):
         changes.append(
             f"Destination: {_destination_label(before)} -> {_destination_label(after)}"
+        )
+    if _text_value(before.get("pnr")) != _text_value(after.get("pnr")):
+        changes.append(f"PNR: {_text_value(before.get('pnr'))} -> {_text_value(after.get('pnr'))}")
+    if _text_value(before.get("passenger_name")) != _text_value(after.get("passenger_name")):
+        changes.append(
+            f"Passenger Name: {_text_value(before.get('passenger_name'))} -> {_text_value(after.get('passenger_name'))}"
         )
 
     for key, label in [
@@ -3347,9 +3439,22 @@ def _report_to_pdf(title: str, rows):
                 page_width * 0.18,
             ]
             elements.append(make_table([header] + data_rows, col_widths, header=True))
+        elif header == ["Airline", "Tickets Sold", "Total", "Cash", "Card"]:
+            col_widths = [
+                page_width * 0.38,
+                page_width * 0.14,
+                page_width * 0.16,
+                page_width * 0.16,
+                page_width * 0.16,
+            ]
+            elements.append(make_table([header] + data_rows, col_widths, header=True))
         elif header == ["Total", "Cash", "Card"] and len(data_rows) == 1:
             totals_table = [header] + data_rows
             col_widths = [page_width * 0.34, page_width * 0.33, page_width * 0.33]
+            elements.append(make_table(totals_table, col_widths, header=True, total_row=True))
+        elif header == ["Tickets Sold", "Total", "Cash", "Card"] and len(data_rows) == 1:
+            totals_table = [header] + data_rows
+            col_widths = [page_width * 0.25, page_width * 0.25, page_width * 0.25, page_width * 0.25]
             elements.append(make_table(totals_table, col_widths, header=True, total_row=True))
         else:
             col_count = max(len(r) for r in table_rows)
@@ -3431,6 +3536,15 @@ def _build_standard_report_rows(data: dict[str, Any], date_filter: str, *, label
     rows.append(["Airport Fees Total (All)"])
     rows.append(["Total", "Cash", "Card"])
     rows.append([data["airport_all"]["total"], data["airport_all"]["cash_total"], data["airport_all"]["card_total"]])
+    rows.append([])
+    rows.append(["Plane Ticket Sales Total by Airline"])
+    rows.append(["Airline", "Tickets Sold", "Total", "Cash", "Card"])
+    for r in data["ticket_totals"]:
+        airline = f"{r['name']}{' (' + r['code'] + ')' if r['code'] else ''}"
+        rows.append([airline, r["qty"], r["total"], r["cash_total"], r["card_total"]])
+    rows.append(["Plane Ticket Sales Total (All)"])
+    rows.append(["Tickets Sold", "Total", "Cash", "Card"])
+    rows.append([data["ticket_all"]["qty"], data["ticket_all"]["total"], data["ticket_all"]["cash_total"], data["ticket_all"]["card_total"]])
     rows.append([])
     rows.append(["All Fees Total"])
     rows.append(["Total", "Cash", "Card"])

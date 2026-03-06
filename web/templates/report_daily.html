@@ -207,4 +207,36 @@
     </div>
   </div>
 </div>
+
+<div class="card">
+  <h3>Plane Ticket Sales</h3>
+  <h4>Plane Ticket Sales Total by Airline</h4>
+  <table>
+    <thead><tr><th>Airline</th><th>Tickets Sold</th><th>Total</th><th>Cash</th><th>Card</th></tr></thead>
+    <tbody>
+    {% for r in ticket_totals %}
+      <tr>
+        <td>{{ r.name }}{% if r.code %} ({{ r.code }}){% endif %}</td>
+        <td>{{ r.qty }}</td>
+        <td>{{ r.total }}</td>
+        <td>{{ r.cash_total }}</td>
+        <td>{{ r.card_total }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h4>Plane Ticket Sales Total (All)</h4>
+  <table>
+    <thead><tr><th>Tickets Sold</th><th>Total</th><th>Cash</th><th>Card</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>{{ ticket_all.qty }}</td>
+        <td>{{ ticket_all.total }}</td>
+        <td>{{ ticket_all.cash_total }}</td>
+        <td>{{ ticket_all.card_total }}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
 {% endblock %}
