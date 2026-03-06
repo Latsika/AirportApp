@@ -144,3 +144,4 @@ sqlite3.IntegrityError: FOREIGN KEY constraint failed
 2026-03-06 12:16:19,407 [INFO] app: App restarted. Sessions will be invalidated.
 2026-03-06 16:06:19,294 [INFO] web.app: App restarted. Sessions will be invalidated.
 2026-03-06 16:06:45,125 [INFO] app: App restarted. Sessions will be invalidated.
+2026-03-06 16:13:32,359 [INFO] app: App restarted. Sessions will be invalidated.
