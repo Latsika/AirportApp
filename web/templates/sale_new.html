@@ -79,6 +79,7 @@
 
   .fee-row:last-child { border-bottom: none; }
   .fee-row input[type="number"] { width: 100%; }
+  .fee-row .line-amount-input { width: 100%; }
   .fee-row .line-total { text-align: right; font-weight: 900; }
 
   .total {
@@ -351,8 +352,10 @@
       const rows = container.querySelectorAll(".fee-row");
       rows.forEach(row => {
         const qty = row.querySelector("input[type='number']");
+        const amountInput = row.querySelector(".line-amount-input");
         const remove = row.querySelector(".remove-btn");
         if (qty) qty.addEventListener("input", updateTotals);
+        if (amountInput) amountInput.addEventListener("input", updateTotals);
         if (remove) remove.addEventListener("click", () => {
           row.remove();
           updateTotals();
@@ -365,8 +368,13 @@
       const rows = container.querySelectorAll(".fee-row");
       rows.forEach(row => {
         const qty = row.querySelector("input[type='number']");
+        const amountInput = row.querySelector(".line-amount-input");
         const line = row.querySelector(".line-total");
-        const amount = parseNum(row.dataset.amount);
+        let amount = parseNum(row.dataset.amount);
+        if (amountInput) {
+          amount = parseNum(amountInput.value);
+          row.dataset.amount = String(amount);
+        }
         const q = Math.max(1, parseNum(qty ? qty.value : 1));
         const lineTotal = amount * q;
         if (line) line.textContent = lineTotal.toFixed(2);
@@ -392,11 +400,16 @@
       row.dataset.amount = fee.amount;
       row.dataset.currency = fee.currency;
       row.dataset.feeId = fee.id;
+      const isManualAirline = prefix === "airline" && fee.price_mode === "manual";
+      const priceCell = isManualAirline
+        ? `<input class="line-amount-input" name="${prefix}_amount_${fee.id}" value="${parseNum(fee.amount).toFixed(2)}" placeholder="0.00">`
+        : `${fee.amount} ${fee.currency}`;
+      const modeTag = isManualAirline ? ` <span class="muted">[manual]</span>` : "";
       row.innerHTML = `
-        <div>${fee.fee_name} <span class="muted">(${fee.fee_key})</span>
+        <div>${fee.fee_name}${modeTag} <span class="muted">(${fee.fee_key})</span>
           <input type="hidden" name="${prefix}_fee_id" value="${fee.id}">
         </div>
-        <div>${fee.amount} ${fee.currency}</div>
+        <div>${priceCell}</div>
         <input type="number" min="1" step="1" name="${prefix}_qty_${fee.id}" value="1">
         <div class="line-total">0.00</div>
         <button type="button" class="remove-btn">Remove</button>

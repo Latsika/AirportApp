@@ -2406,7 +2406,7 @@ def _load_sale_fee_data():
 
         cur.execute(
             """
-            SELECT id, airline_id, fee_key, fee_name, amount, currency, unit
+            SELECT id, airline_id, fee_key, fee_name, amount, currency, unit, price_mode
             FROM airline_fees
             ORDER BY fee_name COLLATE NOCASE ASC
             """
@@ -2441,6 +2441,7 @@ def _load_sale_fee_data():
                 "amount": f["amount"],
                 "currency": f["currency"],
                 "unit": f["unit"],
+                "price_mode": (f["price_mode"] or "fixed"),
             }
         )
 
@@ -2538,10 +2539,14 @@ def sale_new():
                 fid = int(fid_raw)
             except ValueError:
                 continue
-            qty = max(1, int(request.form.get(f"airline_qty_{fid}") or "1"))
+            try:
+                qty = max(1, int(request.form.get(f"airline_qty_{fid}") or "1"))
+            except ValueError:
+                flash("Invalid quantity for airline fee.")
+                return redirect(url_for("sale_new"))
             cur.execute(
                 """
-                SELECT id, fee_key, fee_name, amount, currency
+                SELECT id, fee_key, fee_name, amount, currency, price_mode
                 FROM airline_fees
                 WHERE id = ? AND airline_id = ?
                 """,
@@ -2550,7 +2555,13 @@ def sale_new():
             fee = cur.fetchone()
             if not fee:
                 continue
-            amount = float(fee["amount"] or 0)
+            if (fee["price_mode"] or "fixed") == "manual":
+                amount = _parse_amount(request.form.get(f"airline_amount_{fid}"))
+                if amount <= 0:
+                    flash(f"Manual amount for airline fee '{fee['fee_name']}' must be greater than 0.")
+                    return redirect(url_for("sale_new"))
+            else:
+                amount = float(fee["amount"] or 0)
             total = round(amount * qty, 4)
             items.append(
                 {
@@ -2845,10 +2856,14 @@ def sale_edit(sale_id: int):
                 fid = int(fid_raw)
             except ValueError:
                 continue
-            qty = max(1, int(request.form.get(f"airline_qty_{fid}") or "1"))
+            try:
+                qty = max(1, int(request.form.get(f"airline_qty_{fid}") or "1"))
+            except ValueError:
+                flash("Invalid quantity for airline fee.")
+                return redirect(url_for("sale_edit", sale_id=sale_id))
             cur.execute(
                 """
-                SELECT id, fee_key, fee_name, amount, currency
+                SELECT id, fee_key, fee_name, amount, currency, price_mode
                 FROM airline_fees
                 WHERE id = ? AND airline_id = ?
                 """,
@@ -2857,7 +2872,13 @@ def sale_edit(sale_id: int):
             fee = cur.fetchone()
             if not fee:
                 continue
-            amount = float(fee["amount"] or 0)
+            if (fee["price_mode"] or "fixed") == "manual":
+                amount = _parse_amount(request.form.get(f"airline_amount_{fid}"))
+                if amount <= 0:
+                    flash(f"Manual amount for airline fee '{fee['fee_name']}' must be greater than 0.")
+                    return redirect(url_for("sale_edit", sale_id=sale_id))
+            else:
+                amount = float(fee["amount"] or 0)
             total = round(amount * qty, 4)
             items.append(
                 {
@@ -4355,6 +4376,11 @@ def _parse_amount(value: str | None) -> float:
         return 0.0
 
 
+def _parse_price_mode(value: str | None) -> str:
+    mode = (value or "").strip().lower()
+    return "manual" if mode == "manual" else "fixed"
+
+
 @app.get("/airlines", endpoint="airlines")
 @admin_required
 def airlines():
@@ -5082,7 +5108,7 @@ def airline_fees(airline_id: int):
 
         cur.execute(
             """
-            SELECT id, fee_key, fee_name, amount, currency, unit, notes, updated_at_utc
+            SELECT id, fee_key, fee_name, amount, currency, unit, notes, price_mode, updated_at_utc
             FROM airline_fees
             WHERE airline_id = ?
             ORDER BY fee_name COLLATE NOCASE ASC
@@ -5101,6 +5127,7 @@ def airline_fees_add(airline_id: int):
     fee_key = _sanitize(request.form.get("fee_key")).upper()
     fee_name = _sanitize(request.form.get("fee_name"))
     amount = _parse_amount(request.form.get("amount"))
+    price_mode = _parse_price_mode(request.form.get("price_mode"))
     currency = _sanitize(request.form.get("currency")) or "EUR"
     unit = _sanitize(request.form.get("unit"))
     notes = _sanitize(request.form.get("notes"))
@@ -5120,10 +5147,20 @@ def airline_fees_add(airline_id: int):
         cur.execute(
             """
             INSERT INTO airline_fees
-                (airline_id, fee_key, fee_name, amount, currency, unit, notes, updated_at_utc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (airline_id, fee_key, fee_name, amount, currency, unit, notes, price_mode, updated_at_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (airline_id, fee_key, fee_name, amount, currency, unit or None, notes or None, now),
+            (
+                airline_id,
+                fee_key,
+                fee_name,
+                amount,
+                currency,
+                unit or None,
+                notes or None,
+                price_mode,
+                now,
+            ),
         )
         conn.commit()
 
@@ -5142,7 +5179,7 @@ def airline_fee_edit(airline_id: int, fee_id: int):
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, fee_key, fee_name, amount, currency, unit, notes
+            SELECT id, fee_key, fee_name, amount, currency, unit, notes, price_mode
             FROM airline_fees
             WHERE id = ? AND airline_id = ?
             """,
@@ -5161,6 +5198,7 @@ def airline_fee_edit(airline_id: int, fee_id: int):
     fee_key = _sanitize(request.form.get("fee_key")).upper()
     fee_name = _sanitize(request.form.get("fee_name"))
     amount = _parse_amount(request.form.get("amount"))
+    price_mode = _parse_price_mode(request.form.get("price_mode"))
     currency = _sanitize(request.form.get("currency")) or "EUR"
     unit = _sanitize(request.form.get("unit"))
     notes = _sanitize(request.form.get("notes"))
@@ -5183,10 +5221,21 @@ def airline_fee_edit(airline_id: int, fee_id: int):
         cur.execute(
             """
             UPDATE airline_fees
-            SET fee_key = ?, fee_name = ?, amount = ?, currency = ?, unit = ?, notes = ?, updated_at_utc = ?
+            SET fee_key = ?, fee_name = ?, amount = ?, currency = ?, unit = ?, notes = ?, price_mode = ?, updated_at_utc = ?
             WHERE id = ? AND airline_id = ?
             """,
-            (fee_key, fee_name, amount, currency, unit or None, notes or None, now, fee_id, airline_id),
+            (
+                fee_key,
+                fee_name,
+                amount,
+                currency,
+                unit or None,
+                notes or None,
+                price_mode,
+                now,
+                fee_id,
+                airline_id,
+            ),
         )
         conn.commit()
 

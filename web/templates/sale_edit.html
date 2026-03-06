@@ -70,6 +70,7 @@
 
   .fee-row:last-child { border-bottom: none; }
   .fee-row input[type="number"] { width: 100%; }
+  .fee-row .line-amount-input { width: 100%; }
   .fee-row .line-total { text-align: right; font-weight: 900; }
 
   .total {
@@ -317,8 +318,10 @@
       const rows = container.querySelectorAll(".fee-row");
       rows.forEach(row => {
         const qty = row.querySelector("input[type='number']");
+        const amountInput = row.querySelector(".line-amount-input");
         const remove = row.querySelector(".remove-btn");
         if (qty) qty.addEventListener("input", updateTotals);
+        if (amountInput) amountInput.addEventListener("input", updateTotals);
         if (remove) remove.addEventListener("click", () => {
           row.remove();
           updateTotals();
@@ -331,8 +334,13 @@
       const rows = container.querySelectorAll(".fee-row");
       rows.forEach(row => {
         const qty = row.querySelector("input[type='number']");
+        const amountInput = row.querySelector(".line-amount-input");
         const line = row.querySelector(".line-total");
-        const amount = parseNum(row.dataset.amount);
+        let amount = parseNum(row.dataset.amount);
+        if (amountInput) {
+          amount = parseNum(amountInput.value);
+          row.dataset.amount = String(amount);
+        }
         const q = Math.max(1, parseNum(qty ? qty.value : 1));
         const lineTotal = amount * q;
         if (line) line.textContent = lineTotal.toFixed(2);
@@ -352,17 +360,23 @@
       grandTotal.textContent = gTotal.toFixed(2);
     }
 
-    function addFeeRow(container, fee, prefix, qtyVal) {
+    function addFeeRow(container, fee, prefix, qtyVal, amountVal) {
       const row = document.createElement("div");
       row.className = "fee-row";
-      row.dataset.amount = fee.amount;
+      const isManualAirline = prefix === "airline" && fee.price_mode === "manual";
+      row.dataset.amount = isManualAirline ? (amountVal != null ? amountVal : fee.amount) : fee.amount;
       row.dataset.currency = fee.currency;
       row.dataset.feeId = fee.id;
+      const manualValue = parseNum(amountVal != null ? amountVal : fee.amount).toFixed(2);
+      const priceCell = isManualAirline
+        ? `<input class="line-amount-input" name="${prefix}_amount_${fee.id}" value="${manualValue}" placeholder="0.00">`
+        : `${fee.amount} ${fee.currency}`;
+      const modeTag = isManualAirline ? ` <span class="muted">[manual]</span>` : "";
       row.innerHTML = `
-        <div>${fee.fee_name} <span class="muted">(${fee.fee_key})</span>
+        <div>${fee.fee_name}${modeTag} <span class="muted">(${fee.fee_key})</span>
           <input type="hidden" name="${prefix}_fee_id" value="${fee.id}">
         </div>
-        <div>${fee.amount} ${fee.currency}</div>
+        <div>${priceCell}</div>
         <input type="number" min="1" step="1" name="${prefix}_qty_${fee.id}" value="${qtyVal || 1}">
         <div class="line-total">0.00</div>
         <button type="button" class="remove-btn">Remove</button>
@@ -381,10 +395,10 @@
         if (item.fee_source === "airline") {
           const list = airlineFeesMap[Number(airlineSelect.value || 0)] || [];
           const fee = list.find(f => Number(f.id) === Number(item.fee_id));
-          if (fee) addFeeRow(airlineFeesList, fee, "airline", item.quantity);
+          if (fee) addFeeRow(airlineFeesList, fee, "airline", item.quantity, item.amount);
         } else if (item.fee_source === "airport") {
           const fee = airportFees.find(f => Number(f.id) === Number(item.fee_id));
-          if (fee) addFeeRow(airportFeesList, fee, "airport", item.quantity);
+          if (fee) addFeeRow(airportFeesList, fee, "airport", item.quantity, null);
         } else if (item.fee_source === "ticket") {
           ticketQtyInput.value = item.quantity;
           ticketAmountInput.value = item.amount;
@@ -406,14 +420,14 @@
       const list = airlineFeesMap[aid] || [];
       const fee = findFeeByLabel(list, airlineFeeSearch.value);
       if (!fee) return;
-      addFeeRow(airlineFeesList, fee, "airline", 1);
+      addFeeRow(airlineFeesList, fee, "airline", 1, fee.amount);
       airlineFeeSearch.value = "";
     });
 
     airportFeeAdd.addEventListener("click", function () {
       const fee = findFeeByLabel(airportFees, airportFeeSearch.value);
       if (!fee) return;
-      addFeeRow(airportFeesList, fee, "airport", 1);
+      addFeeRow(airportFeesList, fee, "airport", 1, fee.amount);
       airportFeeSearch.value = "";
     });
 

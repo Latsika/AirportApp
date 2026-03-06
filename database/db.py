@@ -522,11 +522,22 @@ def _migrate_airline_fees_table(conn: sqlite3.Connection) -> None:
         cur.execute("ALTER TABLE airline_fees ADD COLUMN unit TEXT")
     if "notes" not in cols:
         cur.execute("ALTER TABLE airline_fees ADD COLUMN notes TEXT")
+    if "price_mode" not in cols:
+        cur.execute("ALTER TABLE airline_fees ADD COLUMN price_mode TEXT NOT NULL DEFAULT 'fixed'")
     if "updated_at_utc" not in cols:
         cur.execute("ALTER TABLE airline_fees ADD COLUMN updated_at_utc TEXT")
 
     conn.commit()
 
+    cur.execute(
+        """
+        UPDATE airline_fees
+        SET price_mode = 'fixed'
+        WHERE price_mode IS NULL
+           OR TRIM(price_mode) = ''
+           OR LOWER(price_mode) NOT IN ('fixed', 'manual')
+        """
+    )
     cur.execute(
         "UPDATE airline_fees SET updated_at_utc = ? WHERE updated_at_utc IS NULL OR updated_at_utc = ''",
         (now,),
@@ -1081,6 +1092,7 @@ def init_db() -> None:
                 currency TEXT NOT NULL DEFAULT 'EUR',
                 unit TEXT,
                 notes TEXT,
+                price_mode TEXT NOT NULL DEFAULT 'fixed',
                 updated_at_utc TEXT NOT NULL,
                 FOREIGN KEY(airline_id) REFERENCES airlines(id) ON DELETE CASCADE
             )

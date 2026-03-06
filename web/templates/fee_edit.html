@@ -21,6 +21,13 @@
 
   <label class="muted">Amount</label>
   <input name="amount" value="{{ fee.amount }}">
+  <div class="muted" style="margin-top:-4px; margin-bottom:8px;">Used when price mode is Fixed.</div>
+
+  <label class="muted">Price mode</label>
+  <label style="display:flex; gap:8px; align-items:center; margin:6px 0 12px;">
+    <input type="checkbox" name="price_mode" value="manual" {% if fee.price_mode == "manual" %}checked{% endif %}>
+    <span>Manual amount in Sales</span>
+  </label>
 
   <label class="muted">Currency</label>
   <input name="currency" value="{{ fee.currency }}">
