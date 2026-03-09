@@ -1237,6 +1237,11 @@ def log_auth_event(
 
     with get_connection() as conn:
         cur = conn.cursor()
+        safe_user_id = user_id
+        if safe_user_id is not None:
+            cur.execute("SELECT 1 FROM users WHERE id = ?", (safe_user_id,))
+            if not cur.fetchone():
+                safe_user_id = None
         cur.execute(
             """
             INSERT INTO auth_logs (
@@ -1246,7 +1251,7 @@ def log_auth_event(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                user_id,
+                safe_user_id,
                 nickname,
                 fullname,
                 role,
@@ -1306,6 +1311,18 @@ def log_sales_event(
 
     with get_connection() as conn:
         cur = conn.cursor()
+        safe_user_id = user_id
+        safe_sale_id = sale_id
+
+        if safe_user_id is not None:
+            cur.execute("SELECT 1 FROM users WHERE id = ?", (safe_user_id,))
+            if not cur.fetchone():
+                safe_user_id = None
+        if safe_sale_id is not None:
+            cur.execute("SELECT 1 FROM sales WHERE id = ?", (safe_sale_id,))
+            if not cur.fetchone():
+                safe_sale_id = None
+
         cur.execute(
             """
             INSERT INTO sales_logs (
@@ -1314,8 +1331,8 @@ def log_sales_event(
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                user_id,
-                sale_id,
+                safe_user_id,
+                safe_sale_id,
                 action,
                 details,
                 ip,
