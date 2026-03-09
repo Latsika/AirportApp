@@ -3064,7 +3064,7 @@ def sales_delete(sale_id: int):
         details = "Deleted sale."
     log_sales_event(
         user_id=session.get("user_id"),
-        sale_id=sale_id,
+        sale_id=None,
         action="SALE_DELETE",
         details=details,
         ip=_client_ip(),
