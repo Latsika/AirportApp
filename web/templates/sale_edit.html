@@ -151,6 +151,12 @@
         <label class="muted">Passenger Name (optional)</label>
         <input name="passenger_name" value="{{ sale.passenger_name or '' }}">
       </div>
+      {% if session.role == 'Admin' %}
+      <div>
+        <label class="muted">Sale Date*</label>
+        <input type="date" name="sold_at_date" value="{{ sale.sold_at_utc[:10] if sale.sold_at_utc else '' }}" required>
+      </div>
+      {% endif %}
     </div>
 
     <div class="fee-section">

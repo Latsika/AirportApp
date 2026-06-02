@@ -133,6 +133,15 @@ def _today_utc_date() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
+def _replace_iso_date(value: str, new_date: str) -> str:
+    parsed_date = datetime.strptime(new_date, "%Y-%m-%d").date()
+    try:
+        current = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        current = datetime.combine(parsed_date, datetime.min.time(), tzinfo=timezone.utc)
+    return datetime.combine(parsed_date, current.timetz()).isoformat()
+
+
 def _month_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m")
 
@@ -1960,6 +1969,10 @@ def _format_sale_changes(before: dict, after: dict) -> str:
         changes.append(
             f"Passenger Name: {_text_value(before.get('passenger_name'))} -> {_text_value(after.get('passenger_name'))}"
         )
+    if _text_value(before.get("sold_at_utc")) != _text_value(after.get("sold_at_utc")):
+        changes.append(
+            f"Sold At: {_text_value(before.get('sold_at_utc'))} -> {_text_value(after.get('sold_at_utc'))}"
+        )
 
     for key, label in [
         ("payment_method", "Payment"),
@@ -2491,7 +2504,7 @@ def sale_new():
     passenger_name = _sanitize(request.form.get("passenger_name"))
     ticket_qty_raw = request.form.get("ticket_qty") or "0"
     ticket_amount = _parse_amount(request.form.get("ticket_amount"))
-    payment_method = _sanitize(request.form.get("payment_method")).upper() or "CASH"
+    payment_method = _sanitize(request.form.get("payment_method")).upper() or "CARD"
     sale_group_id = _sanitize(request.form.get("sale_group_id")) or None
 
     try:
@@ -2826,6 +2839,20 @@ def sale_edit(sale_id: int):
     with get_connection() as conn:
         cur = conn.cursor()
         before_snapshot = _sale_snapshot(conn, sale_id)
+        if not before_snapshot:
+            flash("Sale not found.")
+            return redirect(url_for("sales_list"))
+
+        sold_at_utc = before_snapshot.get("sold_at_utc") or _utc_now_iso()
+        if session.get("role") == "Admin":
+            sold_at_date = _sanitize(request.form.get("sold_at_date"))
+            if sold_at_date:
+                try:
+                    sold_at_utc = _replace_iso_date(sold_at_utc, sold_at_date)
+                except ValueError:
+                    flash("Invalid sale date.")
+                    return redirect(url_for("sale_edit", sale_id=sale_id))
+
         cur.execute("SELECT id, name, code FROM airlines WHERE id = ?", (airline_id,))
         airline_row = cur.fetchone()
         if not airline_row:
@@ -2973,7 +3000,7 @@ def sale_edit(sale_id: int):
                 destination_id,
                 pnr or None,
                 passenger_name or None,
-                now,
+                sold_at_utc,
                 payment_method,
                 cash_amount,
                 card_amount,
