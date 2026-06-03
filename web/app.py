@@ -2786,6 +2786,11 @@ def sales_list():
                 d.dest_name AS destination_name,
                 d.dest_code AS destination_code,
                 s.sold_at_utc,
+                COALESCE((
+                    SELECT SUM(si.total_amount)
+                    FROM sale_items si
+                    WHERE si.sale_id = s.id AND si.fee_source = 'airline'
+                ), 0) AS airline_fee_total,
                 s.grand_total AS total_amount,
                 s.cash_amount,
                 s.card_amount,
