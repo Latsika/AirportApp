@@ -2719,9 +2719,62 @@ def sale_new():
 @login_required
 def sales_list():
     q_raw = _sanitize(request.args.get("q"))
+    pnr_filter = _sanitize(request.args.get("pnr"))
+    passenger_filter = _sanitize(request.args.get("passenger_name"))
+    destination_filter = _sanitize(request.args.get("destination"))
+    sold_by_filter = _sanitize(request.args.get("sold_by"))
     q = f"%{q_raw}%" if q_raw else ""
+    pnr_like = f"%{pnr_filter}%" if pnr_filter else ""
+    passenger_like = f"%{passenger_filter}%" if passenger_filter else ""
+    destination_like = f"%{destination_filter}%" if destination_filter else ""
+    sold_by_like = f"%{sold_by_filter}%" if sold_by_filter else ""
+    airline_id_raw = _sanitize(request.args.get("airline_id"))
+    date_from_raw = _sanitize(request.args.get("date_from"))
+    date_to_raw = _sanitize(request.args.get("date_to"))
+    payment_method = _sanitize(request.args.get("payment_method")).upper()
+
+    try:
+        selected_airline_id = int(airline_id_raw) if airline_id_raw else None
+    except ValueError:
+        selected_airline_id = None
+
+    if payment_method not in {"CASH", "CARD"}:
+        payment_method = ""
+
+    def _parse_filter_date(value: str) -> str:
+        if not value:
+            return ""
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date().isoformat()
+        except ValueError:
+            return ""
+
+    date_from = _parse_filter_date(date_from_raw)
+    date_to = _parse_filter_date(date_to_raw)
+    if date_from and date_to and date_to < date_from:
+        date_from, date_to = date_to, date_from
+
     with get_connection() as conn:
         cur = conn.cursor()
+        cur.execute("SELECT id, name, code FROM airlines ORDER BY name COLLATE NOCASE ASC")
+        airlines = cur.fetchall()
+        cur.execute(
+            """
+            SELECT id, dest_name, dest_code
+            FROM airline_destinations
+            ORDER BY dest_name COLLATE NOCASE ASC, dest_code COLLATE NOCASE ASC
+            """
+        )
+        destinations = cur.fetchall()
+        cur.execute(
+            """
+            SELECT id, fullname, nickname
+            FROM users
+            ORDER BY fullname COLLATE NOCASE ASC, nickname COLLATE NOCASE ASC
+            """
+        )
+        sellers = cur.fetchall()
+
         sql = """
             SELECT
                 s.id,
@@ -2777,13 +2830,78 @@ def sales_list():
             LEFT JOIN users u ON u.id = s.created_by
         """
         params = []
+        where = []
         if q:
-            sql += " WHERE (s.pnr LIKE ? OR s.passenger_name LIKE ?)"
+            where.append("(s.pnr LIKE ? OR s.passenger_name LIKE ?)")
             params.extend([q, q])
+        if pnr_like:
+            where.append("s.pnr LIKE ?")
+            params.append(pnr_like)
+        if passenger_like:
+            where.append("s.passenger_name LIKE ?")
+            params.append(passenger_like)
+        if selected_airline_id is not None:
+            where.append("s.airline_id = ?")
+            params.append(selected_airline_id)
+        if destination_like:
+            where.append(
+                """
+                (
+                    d.dest_name LIKE ?
+                    OR d.dest_code LIKE ?
+                    OR COALESCE(d.dest_name, '') || ' (' || COALESCE(d.dest_code, '') || ')' LIKE ?
+                )
+                """
+            )
+            params.extend([destination_like, destination_like, destination_like])
+        if date_from:
+            where.append("date(s.sold_at_utc) >= ?")
+            params.append(date_from)
+        if date_to:
+            where.append("date(s.sold_at_utc) <= ?")
+            params.append(date_to)
+        if payment_method:
+            where.append("s.payment_method = ?")
+            params.append(payment_method)
+        if sold_by_like:
+            where.append("(u.fullname LIKE ? OR u.nickname LIKE ?)")
+            params.extend([sold_by_like, sold_by_like])
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY s.id DESC"
         cur.execute(sql, params)
         rows = cur.fetchall()
-    return render_template("sales_list.html", sales=rows, q=q_raw)
+    filters = {
+        "q": q_raw,
+        "pnr": pnr_filter,
+        "passenger_name": passenger_filter,
+        "airline_id": str(selected_airline_id) if selected_airline_id is not None else "",
+        "destination": destination_filter,
+        "date_from": date_from,
+        "date_to": date_to,
+        "payment_method": payment_method,
+        "sold_by": sold_by_filter,
+        "active": bool(
+            q_raw
+            or pnr_filter
+            or passenger_filter
+            or selected_airline_id is not None
+            or destination_filter
+            or date_from
+            or date_to
+            or payment_method
+            or sold_by_filter
+        ),
+    }
+    return render_template(
+        "sales_list.html",
+        sales=rows,
+        q=q_raw,
+        filters=filters,
+        airlines=airlines,
+        destinations=destinations,
+        sellers=sellers,
+    )
 
 
 @app.route("/sales/<int:sale_id>/edit", methods=["GET", "POST"], endpoint="sale_edit")
