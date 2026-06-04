@@ -1,0 +1,20 @@
+﻿AirportApp release - 2026-06-04
+
+Customer package:
+- AirportApp.exe
+- install_update.exe
+
+Changes included:
+- Custom Report now includes cumulative Quantity chart for the selected date range.
+- Custom Report now includes cumulative Amount chart for the selected date range.
+- Chart labels were cleaned up for readability: dense charts show values only on meaningful points, not on every point.
+- Custom Report PDF export includes cumulative quantity and cumulative amount chart blocks.
+- Includes previous fixes from the current workstream: live database reward values, Slovak characters in PDF/download filenames, Sales List pagination/performance improvements, and single-instance app launch behavior.
+
+Install/update:
+- For a new portable install, use AirportApp.exe.
+- For an existing customer installation, run install_update.exe and select the folder that contains the customer's current AirportApp.exe.
+
+Notes:
+- The customer's existing airport_app.db should remain in place during update.
+- Do not copy a test database to the customer's machine unless explicitly intended.

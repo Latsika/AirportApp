@@ -462,6 +462,40 @@
   {% endif %}
 </div>
 
+<div class="card" style="margin-top:12px;">
+  <h3>{{ chart_title }} - Cumulative Quantity</h3>
+  {% if chart_data and chart_data.series_qty_cumulative and chart_data.series_qty_cumulative|length > 0 %}
+    <div id="chartQtyCumulative" class="chart" style="height:320px;"></div>
+    <div class="legend">
+      {% for s in chart_data.series_qty_cumulative %}
+        <div class="legend-item">
+          <span class="legend-color" style="background: {{ s.color }}"></span>
+          <span class="muted">{{ s.label }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No chart data.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <h3>{{ chart_title }} - Cumulative Amount</h3>
+  {% if chart_data and chart_data.series_sum_cumulative and chart_data.series_sum_cumulative|length > 0 %}
+    <div id="chartSumCumulative" class="chart" style="height:320px;"></div>
+    <div class="legend">
+      {% for s in chart_data.series_sum_cumulative %}
+        <div class="legend-item">
+          <span class="legend-color" style="background: {{ s.color }}"></span>
+          <span class="muted">{{ s.label }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No chart data.</p>
+  {% endif %}
+</div>
+
 
 <script>
   (function () {
@@ -739,8 +773,9 @@
     });
 
     const chartData = {{ chart_data|tojson }};
-    function renderChart(chartEl, dataSeries) {
+    function renderChart(chartEl, dataSeries, options) {
       if (!chartEl || !chartData || !dataSeries || !dataSeries.length) return;
+      options = options || {};
       const dates = chartData.dates;
       const series = dataSeries;
       const width = chartEl.clientWidth || 900;
@@ -749,6 +784,8 @@
       const innerW = width - pad.left - pad.right;
       const innerH = height - pad.top - pad.bottom;
       const maxY = Math.max(...series.flatMap(s => s.values), 1);
+      const denseChart = dates.length > 20 || series.length > 3;
+      const formatValue = options.formatValue || ((v) => String(v));
 
       const svgNS = "http://www.w3.org/2000/svg";
       const svg = document.createElementNS(svgNS, "svg");
@@ -800,14 +837,34 @@
         path.setAttribute("stroke-width", "2");
         svg.appendChild(path);
 
+        const visibleValueIndexes = new Set();
+        let firstValueIndex = -1;
+        let lastValueIndex = -1;
         s.values.forEach((v, i) => {
           if (!v) return;
-          const dot = document.createElementNS(svgNS, "circle");
-          dot.setAttribute("cx", xScale(i));
-          dot.setAttribute("cy", yScale(v));
-          dot.setAttribute("r", "3");
-          dot.setAttribute("fill", s.color || "var(--accent)");
-          svg.appendChild(dot);
+          if (firstValueIndex === -1) firstValueIndex = i;
+          lastValueIndex = i;
+          const prev = i > 0 ? Number(s.values[i - 1] || 0) : 0;
+          if (Number(v) !== prev) visibleValueIndexes.add(i);
+        });
+        if (firstValueIndex >= 0) visibleValueIndexes.add(firstValueIndex);
+        if (lastValueIndex >= 0) visibleValueIndexes.add(lastValueIndex);
+
+        s.values.forEach((v, i) => {
+          if (!v) return;
+          const showValue = !denseChart || visibleValueIndexes.has(i);
+          const showDot = showValue || !denseChart || i % Math.ceil(dates.length / 18) === 0;
+
+          if (showDot) {
+            const dot = document.createElementNS(svgNS, "circle");
+            dot.setAttribute("cx", xScale(i));
+            dot.setAttribute("cy", yScale(v));
+            dot.setAttribute("r", showValue ? "3.5" : "2");
+            dot.setAttribute("fill", s.color || "var(--accent)");
+            svg.appendChild(dot);
+          }
+
+          if (!showValue) return;
 
           const label = document.createElementNS(svgNS, "text");
           label.setAttribute("x", xScale(i));
@@ -815,7 +872,7 @@
           label.setAttribute("fill", "#e2e8f0");
           label.setAttribute("font-size", "10");
           label.setAttribute("text-anchor", "middle");
-          label.textContent = v;
+          label.textContent = formatValue(v);
           svg.appendChild(label);
         });
       });
@@ -824,8 +881,13 @@
       chartEl.appendChild(svg);
     }
 
+    const amountOptions = {
+      formatValue: (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 })
+    };
     renderChart(document.getElementById("chartQty"), chartData.series_qty);
-    renderChart(document.getElementById("chartSum"), chartData.series_sum);
+    renderChart(document.getElementById("chartSum"), chartData.series_sum, amountOptions);
+    renderChart(document.getElementById("chartQtyCumulative"), chartData.series_qty_cumulative);
+    renderChart(document.getElementById("chartSumCumulative"), chartData.series_sum_cumulative, amountOptions);
   })();
 </script>
 {% endblock %}

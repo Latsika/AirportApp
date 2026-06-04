@@ -580,7 +580,13 @@ def _custom_report_where(filters: dict):
 def _build_custom_report(filters: dict):
     where, params = _custom_report_where(filters)
     if where is None:
-        return [], {"dates": [], "series": []}
+        return [], {
+            "dates": [],
+            "series_qty": [],
+            "series_sum": [],
+            "series_qty_cumulative": [],
+            "series_sum_cumulative": [],
+        }
 
     sql = f"""
         SELECT
@@ -682,12 +688,34 @@ def _build_custom_report(filters: dict):
 
     series_qty_list = []
     series_sum_list = []
+    series_qty_cumulative_list = []
+    series_sum_cumulative_list = []
     for k, v in series_qty.items():
-        series_qty_list.append({"label": k, "values": [v.get(d, 0) for d in date_list]})
+        values = [v.get(d, 0) for d in date_list]
+        cumulative_values = []
+        running = 0
+        for value in values:
+            running += int(value or 0)
+            cumulative_values.append(running)
+        series_qty_list.append({"label": k, "values": values})
+        series_qty_cumulative_list.append({"label": k, "values": cumulative_values})
     for k, v in series_sum.items():
-        series_sum_list.append({"label": k, "values": [v.get(d, 0.0) for d in date_list]})
+        values = [v.get(d, 0.0) for d in date_list]
+        cumulative_values = []
+        running = 0.0
+        for value in values:
+            running += float(value or 0.0)
+            cumulative_values.append(round(running, 4))
+        series_sum_list.append({"label": k, "values": values})
+        series_sum_cumulative_list.append({"label": k, "values": cumulative_values})
 
-    chart_payload = {"dates": date_list, "series_qty": series_qty_list, "series_sum": series_sum_list}
+    chart_payload = {
+        "dates": date_list,
+        "series_qty": series_qty_list,
+        "series_sum": series_sum_list,
+        "series_qty_cumulative": series_qty_cumulative_list,
+        "series_sum_cumulative": series_sum_cumulative_list,
+    }
     return rows, chart_payload
 
 
@@ -1127,6 +1155,16 @@ def _custom_report_to_pdf(title: str, rows, chart_data, date_from: str, date_to:
         _render_chart_block(
             chart_data.get("series_sum", []),
             "Amount by date (up to 6 series)",
+            lambda v: f"{float(v):.2f}",
+        )
+        _render_chart_block(
+            chart_data.get("series_qty_cumulative", []),
+            "Cumulative quantity by date (up to 6 series)",
+            lambda v: f"{int(v)}",
+        )
+        _render_chart_block(
+            chart_data.get("series_sum_cumulative", []),
+            "Cumulative amount by date (up to 6 series)",
             lambda v: f"{float(v):.2f}",
         )
 
@@ -1785,12 +1823,74 @@ def _compute_variable_rewards_range(year: int, month_from: int, month_to: int):
     month_amounts_by_user = {}
     total_reduced = 0.0
 
-    for selected_month in range(month_from, month_to + 1):
-        _, _, reduced_total, computed_users = _compute_variable_rewards_distribution(
-            year, selected_month
+    start_date, _ = _month_date_range(year, month_from)
+    _, end_date = _month_date_range(year, month_to)
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT CAST(strftime('%m', date(s.sold_at_utc)) AS INTEGER) AS month,
+                   SUM(si.total_amount) AS total
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            WHERE si.fee_source = 'airport'
+              AND date(s.sold_at_utc) BETWEEN ? AND ?
+            GROUP BY CAST(strftime('%m', date(s.sold_at_utc)) AS INTEGER)
+            """,
+            (start_date, end_date),
         )
+        monthly_totals = {int(r["month"]): float(r["total"] or 0) for r in cur.fetchall()}
+        cur.execute(
+            "SELECT id, fullname, nickname, role, active "
+            "FROM users ORDER BY fullname COLLATE NOCASE ASC"
+        )
+        users = cur.fetchall()
+        cur.execute(
+            """
+            SELECT key, value
+            FROM app_state
+            WHERE key LIKE ? OR key LIKE ?
+            """,
+            (
+                f"variable_rewards_percent_{year}_%",
+                f"variable_rewards_manual_{year}_%",
+            ),
+        )
+        app_state = {r["key"]: r["value"] for r in cur.fetchall()}
+
+    for selected_month in range(month_from, month_to + 1):
+        percent_raw = app_state.get(f"variable_rewards_percent_{year}_{selected_month:02d}") or "100"
+        try:
+            percent_value = float(percent_raw)
+        except ValueError:
+            percent_value = 100.0
+        percent_value = round(min(100.0, max(0.0, percent_value)))
+        reduced_total = monthly_totals.get(selected_month, 0.0) * (percent_value / 100)
         total_reduced += float(reduced_total or 0)
-        for u in computed_users:
+
+        manual_map = {}
+        for u in users:
+            raw = app_state.get(f"variable_rewards_manual_{year}_{selected_month:02d}_{u['id']}")
+            if raw is None:
+                continue
+            try:
+                manual_map[u["id"]] = float(raw)
+            except ValueError:
+                continue
+
+        active_users = [u for u in users if int(u["active"] or 0) == 1]
+        active_manual_sum = sum(
+            manual_map.get(u["id"], 0.0)
+            for u in active_users
+            if manual_map.get(u["id"], 0.0) > 0
+        )
+        active_without_manual = [
+            u for u in active_users if manual_map.get(u["id"], 0.0) <= 0
+        ]
+        remainder = max(0.0, reduced_total - active_manual_sum)
+        per_user = remainder / len(active_without_manual) if active_without_manual else 0.0
+
+        for u in users:
             user_id = int(u["id"])
             users_by_id.setdefault(
                 user_id,
@@ -1802,7 +1902,13 @@ def _compute_variable_rewards_range(year: int, month_from: int, month_to: int):
                     "computed_amount": 0.0,
                 },
             )
-            amount = float(u["computed_amount"] or 0)
+            manual_amount = manual_map.get(u["id"], 0.0)
+            if int(u["active"] or 0) != 1:
+                amount = 0.0
+            elif manual_amount > 0:
+                amount = float(manual_amount)
+            else:
+                amount = float(per_user)
             users_by_id[user_id]["computed_amount"] += amount
             month_amounts_by_user.setdefault(user_id, {})[selected_month] = amount
 
@@ -2782,6 +2888,13 @@ def sale_new():
 @app.get("/sales_list", endpoint="sales_list")
 @login_required
 def sales_list():
+    per_page = 100
+    try:
+        page = int(_sanitize(request.args.get("page")) or "1")
+    except ValueError:
+        page = 1
+    page = max(1, page)
+
     q_raw = _sanitize(request.args.get("q"))
     pnr_filter = _sanitize(request.args.get("pnr"))
     passenger_filter = _sanitize(request.args.get("passenger_name"))
@@ -2937,8 +3050,23 @@ def sales_list():
             params.extend([sold_by_like, sold_by_like])
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY s.id DESC"
-        cur.execute(sql, params)
+        count_sql = """
+            SELECT COUNT(*)
+            FROM sales s
+            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airline_destinations d ON d.id = s.destination_id
+            LEFT JOIN users u ON u.id = s.created_by
+        """
+        if where:
+            count_sql += " WHERE " + " AND ".join(where)
+        cur.execute(count_sql, params)
+        total_sales = int(cur.fetchone()[0] or 0)
+        total_pages = max(1, (total_sales + per_page - 1) // per_page)
+        page = min(page, total_pages)
+        offset = (page - 1) * per_page
+
+        sql += " ORDER BY s.id DESC LIMIT ? OFFSET ?"
+        cur.execute(sql, [*params, per_page, offset])
         rows = cur.fetchall()
     filters = {
         "q": q_raw,
@@ -2965,6 +3093,22 @@ def sales_list():
     return render_template(
         "sales_list.html",
         sales=rows,
+        pagination={
+            "page": page,
+            "per_page": per_page,
+            "total": total_sales,
+            "total_pages": total_pages,
+            "start": offset + 1 if total_sales else 0,
+            "end": min(offset + len(rows), total_sales),
+            "window_pages": list(
+                range(
+                    ((page - 1) // 5) * 5 + 1,
+                    min(((page - 1) // 5) * 5 + 5, total_pages) + 1,
+                )
+            ),
+            "prev_block_page": max(1, ((page - 1) // 5) * 5),
+            "next_block_page": min(total_pages, ((page - 1) // 5) * 5 + 6),
+        },
         q=q_raw,
         filters=filters,
         airlines=airlines,
@@ -3329,6 +3473,10 @@ def reports_custom():
     for idx, s in enumerate(chart_data.get("series_qty", [])):
         s["color"] = palette[idx % len(palette)]
     for idx, s in enumerate(chart_data.get("series_sum", [])):
+        s["color"] = palette[idx % len(palette)]
+    for idx, s in enumerate(chart_data.get("series_qty_cumulative", [])):
+        s["color"] = palette[idx % len(palette)]
+    for idx, s in enumerate(chart_data.get("series_sum_cumulative", [])):
         s["color"] = palette[idx % len(palette)]
 
     airline_items_summary = (
@@ -5123,19 +5271,15 @@ def variable_rewards_print(user_id: int):
     rows.append([title, f"Up to {period_label}"])
     rows.append([])
     rows.append(["Month", "Amount"])
+    _, _, month_amounts_by_user = _compute_variable_rewards_range(year, 1, month)
+    month_rows = month_amounts_by_user.get(user_id, {})
     ytd_total = 0.0
-    month_rows = []
-    for selected_month in range(1, month + 1):
-        _, _, _, computed_users = _compute_variable_rewards_distribution(year, selected_month)
-        computed_user = next((u for u in computed_users if int(u["id"]) == int(user_id)), None)
-        computed_amount = float(computed_user["computed_amount"] or 0) if computed_user else 0.0
-        month_rows.append({"month": selected_month, "computed_amount": computed_amount})
-        ytd_total += computed_amount
 
-    for r in month_rows:
-        m = int(r["month"] or 0)
+    for m in range(1, month + 1):
+        amount = float(month_rows.get(m, 0.0))
+        ytd_total += amount
         label = f"{month_names[m]} {year}" if 1 <= m <= 12 else str(m)
-        rows.append([label, f"{float(r['computed_amount'] or 0):.2f}"])
+        rows.append([label, f"{amount:.2f}"])
     rows.append([])
     rows.append(["Year-to-date total"])
     rows.append([f"{ytd_total:.2f}"])

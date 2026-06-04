@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
+import json
 import os
 import threading
 import time
@@ -32,6 +34,49 @@ def _show_error(message: str) -> None:
         pass
 
 
+def _mutex_name() -> str:
+    digest = hashlib.sha1(_runtime_dir().encode("utf-8")).hexdigest()
+    return f"Local\\AirportApp_{digest}"
+
+
+def _runtime_state_path() -> str:
+    return os.path.join(_runtime_dir(), "app_runtime.json")
+
+
+def _open_existing_instance() -> bool:
+    try:
+        with open(_runtime_state_path(), "r", encoding="utf-8") as f:
+            state = json.load(f)
+        port = int(state.get("port") or 0)
+    except Exception:
+        port = 0
+    if port <= 0:
+        _show_error("AirportApp is already running. Use the existing browser window.")
+        return False
+    webbrowser.open_new(f"http://127.0.0.1:{port}")
+    return True
+
+
+def _acquire_single_instance_mutex():
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.CreateMutexW(None, False, _mutex_name())
+    if not handle:
+        raise OSError("CreateMutexW failed")
+    already_exists = kernel32.GetLastError() == 183
+    return handle, already_exists
+
+
+def _release_single_instance_mutex(handle) -> None:
+    try:
+        ctypes.windll.kernel32.ReleaseMutex(handle)
+    except Exception:
+        pass
+    try:
+        ctypes.windll.kernel32.CloseHandle(handle)
+    except Exception:
+        pass
+
+
 class _ServerThread(threading.Thread):
     def __init__(self, host: str, port: int):
         super().__init__(daemon=True)
@@ -49,6 +94,12 @@ class _ServerThread(threading.Thread):
 
 
 def main() -> None:
+    mutex_handle, already_running = _acquire_single_instance_mutex()
+    if already_running:
+        _open_existing_instance()
+        _release_single_instance_mutex(mutex_handle)
+        return
+
     host = "127.0.0.1"
     raw_port = os.environ.get("AIRPORTAPP_PORT", "").strip()
     try:
@@ -56,20 +107,31 @@ def main() -> None:
     except ValueError:
         port = 0
 
-    server = _ServerThread(host, port)
-    server.start()
-
-    url = f"http://{host}:{server.port}"
-    time.sleep(0.35)
-    webbrowser.open_new(url)
-
+    server = None
     try:
-        while server.is_alive():
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        pass
+        server = _ServerThread(host, port)
+        server.start()
+
+        with open(_runtime_state_path(), "w", encoding="utf-8") as f:
+            json.dump({"host": host, "port": server.port, "pid": os.getpid()}, f)
+
+        url = f"http://{host}:{server.port}"
+        time.sleep(0.35)
+        webbrowser.open_new(url)
+
+        try:
+            while server.is_alive():
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            pass
     finally:
-        server.shutdown()
+        if server is not None:
+            server.shutdown()
+        try:
+            os.remove(_runtime_state_path())
+        except OSError:
+            pass
+        _release_single_instance_mutex(mutex_handle)
 
 
 if __name__ == "__main__":

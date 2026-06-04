@@ -59,6 +59,27 @@
   .items { white-space: pre-line; }
   .filter-summary { display:flex; gap:10px; align-items:center; justify-content:flex-end; margin-top:12px; min-height:36px; }
   .filter-summary .muted { margin:0; }
+  .pagination {
+    display:flex;
+    gap:8px;
+    align-items:center;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+    margin-top:12px;
+  }
+  .page-link {
+    width:auto;
+    margin:0;
+    padding:8px 12px;
+    border-radius:999px;
+    border:1px solid var(--border);
+    background:var(--bg-2);
+    color:#e2e8f0;
+    font-weight:900;
+    text-decoration:none;
+  }
+  .page-link.active { border-color:#38bdf8; box-shadow:0 0 0 2px rgba(56,189,248,.2); }
+  .page-link.disabled { opacity:.45; pointer-events:none; }
 
   th.filterable { position:relative; white-space:nowrap; }
   .th-filter-toggle {
@@ -149,7 +170,11 @@
 <div class="filter-summary">
   {% if filters.active %}
     <a class="btn-small" href="{{ url_for('sales_list') }}">Clear</a>
-    <span class="muted">Filtered results: {{ sales|length }}</span>
+  {% endif %}
+  {% if pagination.total > 0 %}
+    <span class="muted">
+      Showing {{ pagination.start }}-{{ pagination.end }} of {{ pagination.total }}
+    </span>
   {% endif %}
 </div>
 
@@ -352,7 +377,7 @@
       {% if sales and sales|length > 0 %}
       {% for s in sales %}
         <tr>
-          <td>{{ loop.index }}</td>
+          <td>{{ pagination.start + loop.index0 }}</td>
           <td>{{ s.airline_name }}{% if s.airline_code %} ({{ s.airline_code }}){% endif %}</td>
           <td>
             {% if s.destination_name and s.destination_code %}
@@ -399,6 +424,30 @@
       </tbody>
     </table>
     </div>
+    {% if pagination.total_pages > 1 %}
+      <nav class="pagination" aria-label="Sales pagination">
+        {% set args = dict(q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method, sold_by=filters.sold_by) %}
+        {% if pagination.page > 1 %}
+          <a class="page-link" href="{{ url_for('sales_list', page=pagination.page - 1, **args) }}">Previous</a>
+        {% else %}
+          <span class="page-link disabled">Previous</span>
+        {% endif %}
+        {% if pagination.window_pages[0] > 1 %}
+          <a class="page-link" href="{{ url_for('sales_list', page=pagination.prev_block_page, **args) }}">...</a>
+        {% endif %}
+        {% for p in pagination.window_pages %}
+          <a class="page-link {% if p == pagination.page %}active{% endif %}" href="{{ url_for('sales_list', page=p, **args) }}">{{ p }}</a>
+        {% endfor %}
+        {% if pagination.window_pages[-1] < pagination.total_pages %}
+          <a class="page-link" href="{{ url_for('sales_list', page=pagination.next_block_page, **args) }}">...</a>
+        {% endif %}
+        {% if pagination.page < pagination.total_pages %}
+          <a class="page-link" href="{{ url_for('sales_list', page=pagination.page + 1, **args) }}">Next</a>
+        {% else %}
+          <span class="page-link disabled">Next</span>
+        {% endif %}
+      </nav>
+    {% endif %}
     {% else %}
       <p class="muted">No sales yet.</p>
     {% endif %}
