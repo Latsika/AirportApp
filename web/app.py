@@ -8,6 +8,8 @@ import sys
 import time
 import json
 import logging
+import unicodedata
+from urllib.parse import quote
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -1217,6 +1219,35 @@ def _sanitize(value: str) -> str:
     return (value or "").strip()
 
 
+def _ascii_filename(value: str) -> str:
+    transliteration = str.maketrans(
+        {
+            "á": "a", "ä": "a", "č": "c", "ď": "d", "é": "e", "í": "i",
+            "ĺ": "l", "ľ": "l", "ň": "n", "ó": "o", "ô": "o", "ŕ": "r",
+            "ř": "r", "š": "s", "ť": "t", "ú": "u", "ů": "u", "ý": "y",
+            "ž": "z",
+            "Á": "A", "Ä": "A", "Č": "C", "Ď": "D", "É": "E", "Í": "I",
+            "Ĺ": "L", "Ľ": "L", "Ň": "N", "Ó": "O", "Ô": "O", "Ŕ": "R",
+            "Ř": "R", "Š": "S", "Ť": "T", "Ú": "U", "Ů": "U", "Ý": "Y",
+            "Ž": "Z",
+        }
+    )
+    normalized = unicodedata.normalize("NFKD", (value or "").translate(transliteration))
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
+    ascii_value = re.sub(r"[^A-Za-z0-9._ \-\[\]\(\)]", "", ascii_value)
+    ascii_value = re.sub(r"\s+", " ", ascii_value).strip(" .")
+    return ascii_value or "download"
+
+
+def _set_download_filename(resp, filename: str):
+    ascii_name = _ascii_filename(filename)
+    utf8_name = quote(filename or ascii_name, safe="")
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{utf8_name}'
+    )
+    return resp
+
+
 def _is_valid_email(value: str) -> bool:
     if not value or "@" not in value:
         return False
@@ -1747,6 +1778,39 @@ def _compute_variable_rewards_distribution(year: int, month: int):
         )
 
     return monthly_total, percent_value, reduced_total, computed
+
+
+def _compute_variable_rewards_range(year: int, month_from: int, month_to: int):
+    users_by_id = {}
+    month_amounts_by_user = {}
+    total_reduced = 0.0
+
+    for selected_month in range(month_from, month_to + 1):
+        _, _, reduced_total, computed_users = _compute_variable_rewards_distribution(
+            year, selected_month
+        )
+        total_reduced += float(reduced_total or 0)
+        for u in computed_users:
+            user_id = int(u["id"])
+            users_by_id.setdefault(
+                user_id,
+                {
+                    "id": user_id,
+                    "fullname": u["fullname"],
+                    "nickname": u["nickname"],
+                    "role": u["role"],
+                    "computed_amount": 0.0,
+                },
+            )
+            amount = float(u["computed_amount"] or 0)
+            users_by_id[user_id]["computed_amount"] += amount
+            month_amounts_by_user.setdefault(user_id, {})[selected_month] = amount
+
+    rows = sorted(
+        users_by_id.values(),
+        key=lambda u: (u["fullname"] or "").casefold(),
+    )
+    return rows, total_reduced, month_amounts_by_user
 
 
 def _save_variable_rewards_snapshot(
@@ -3749,8 +3813,7 @@ def _export_report(date_filter: str, is_month: bool, fmt: str):
         content = _report_to_csv(rows)
         resp = make_response(content)
         resp.headers["Content-Type"] = "text/csv"
-        resp.headers["Content-Disposition"] = f"attachment; filename={label.lower()}_report_{date_filter}.csv"
-        return resp
+        return _set_download_filename(resp, f"{label.lower()}_report_{date_filter}.csv")
     if fmt == "pdf":
         content = _report_to_pdf(f"{label} Report {date_filter}", rows)
         resp = make_response(content)
@@ -3759,8 +3822,7 @@ def _export_report(date_filter: str, is_month: bool, fmt: str):
             filename = f"[MONTHLY REPORT] {date_filter}.pdf"
         else:
             filename = f"[DAILY REPORT] {date_filter}.pdf"
-        resp.headers["Content-Disposition"] = f"attachment; filename={filename}"
-        return resp
+        return _set_download_filename(resp, filename)
     abort(400)
 
 
@@ -3985,20 +4047,20 @@ def reports_custom_export():
         content = _report_to_csv(flat_rows)
         resp = make_response(content)
         resp.headers["Content-Type"] = "text/csv"
-        resp.headers["Content-Disposition"] = (
-            f"attachment; filename=[CUSTOM REPORT] {filters['date_from']}_to_{filters['date_to']}.csv"
+        return _set_download_filename(
+            resp,
+            f"[CUSTOM REPORT] {filters['date_from']}_to_{filters['date_to']}.csv",
         )
-        return resp
 
     if fmt.lower() == "pdf":
         title = f"Custom Report {filters['date_from']} to {filters['date_to']}"
         content = _custom_report_to_pdf(title, rows, chart_data, filters["date_from"], filters["date_to"])
         resp = make_response(content)
         resp.headers["Content-Type"] = "application/pdf"
-        resp.headers["Content-Disposition"] = (
-            f"attachment; filename=[CUSTOM REPORT] {filters['date_from']}_to_{filters['date_to']}.pdf"
+        return _set_download_filename(
+            resp,
+            f"[CUSTOM REPORT] {filters['date_from']}_to_{filters['date_to']}.pdf",
         )
-        return resp
 
     abort(400)
 
@@ -4838,38 +4900,7 @@ def variable_rewards_summary():
     month_to = min(12, max(1, month_to))
     if month_to < month_from:
         month_from, month_to = month_to, month_from
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT u.id, u.fullname, u.nickname, u.role,
-                   COALESCE(SUM(s.computed_amount), 0) AS computed_amount
-            FROM users u
-            LEFT JOIN variable_rewards_snapshots s
-              ON s.user_id = u.id
-             AND s.year = ?
-             AND s.scope = 'monthly'
-             AND s.month BETWEEN ? AND ?
-            GROUP BY u.id
-            ORDER BY u.fullname COLLATE NOCASE ASC
-            """,
-            (year, month_from, month_to),
-        )
-        rows = cur.fetchall()
-        cur.execute(
-            """
-            SELECT SUM(month_total) AS total
-            FROM (
-                SELECT month, MAX(reduced_total) AS month_total
-                FROM variable_rewards_snapshots
-                WHERE year = ? AND scope = 'monthly' AND month BETWEEN ? AND ?
-                GROUP BY month
-            ) t
-            """,
-            (year, month_from, month_to),
-        )
-        total_row = cur.fetchone()
-        total_reduced = float(total_row["total"] or 0)
+    rows, total_reduced, _ = _compute_variable_rewards_range(year, month_from, month_to)
     return render_template(
         "variable_rewards_summary.html",
         year=year,
@@ -4906,38 +4937,7 @@ def variable_rewards_summary_pdf():
         "", "January", "February", "March", "April", "May", "June",
         "July", "August", "September", "October", "November", "December",
     ]
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT u.fullname, u.nickname, u.role,
-                   COALESCE(SUM(s.computed_amount), 0) AS computed_amount
-            FROM users u
-            LEFT JOIN variable_rewards_snapshots s
-              ON s.user_id = u.id
-             AND s.year = ?
-             AND s.scope = 'monthly'
-             AND s.month BETWEEN ? AND ?
-            GROUP BY u.id
-            ORDER BY u.fullname COLLATE NOCASE ASC
-            """,
-            (year, month_from, month_to),
-        )
-        rows_db = cur.fetchall()
-        cur.execute(
-            """
-            SELECT SUM(month_total) AS total
-            FROM (
-                SELECT month, MAX(reduced_total) AS month_total
-                FROM variable_rewards_snapshots
-                WHERE year = ? AND scope = 'monthly' AND month BETWEEN ? AND ?
-                GROUP BY month
-            ) t
-            """,
-            (year, month_from, month_to),
-        )
-        total_row = cur.fetchone()
-        total_reduced = float(total_row["total"] or 0)
+    rows_db, total_reduced, _ = _compute_variable_rewards_range(year, month_from, month_to)
 
     rows = []
     title = "Yearly Rewards Summary"
@@ -4963,10 +4963,10 @@ def variable_rewards_summary_pdf():
     content = _report_to_pdf(report_title, rows)
     resp = make_response(content)
     resp.headers["Content-Type"] = "application/pdf"
-    resp.headers["Content-Disposition"] = (
-        f"attachment; filename=[REWARDS SUMMARY] {year}-{month_from:02d}-{month_to:02d}.pdf"
+    return _set_download_filename(
+        resp,
+        f"[REWARDS SUMMARY] {year}-{month_from:02d}-{month_to:02d}.pdf",
     )
-    return resp
 
 
 @app.get("/variable_rewards/summary/print/<int:user_id>", endpoint="variable_rewards_summary_print_user")
@@ -5000,16 +5000,8 @@ def variable_rewards_summary_print_user(user_id: int):
             flash("User not found.")
             return redirect(url_for("variable_rewards_summary", year=year, month_from=month_from, month_to=month_to))
 
-        cur.execute(
-            """
-            SELECT month, computed_amount
-            FROM variable_rewards_snapshots
-            WHERE year = ? AND scope = 'monthly' AND user_id = ? AND month BETWEEN ? AND ?
-            ORDER BY month ASC
-            """,
-            (year, user_id, month_from, month_to),
-        )
-        month_rows = {int(r["month"]): float(r["computed_amount"] or 0) for r in cur.fetchall()}
+    _, _, month_amounts_by_user = _compute_variable_rewards_range(year, month_from, month_to)
+    month_rows = month_amounts_by_user.get(user_id, {})
 
     month_names = [
         "", "January", "February", "March", "April", "May", "June",
@@ -5039,10 +5031,10 @@ def variable_rewards_summary_print_user(user_id: int):
     content = _report_to_pdf(report_title, rows)
     resp = make_response(content)
     resp.headers["Content-Type"] = "application/pdf"
-    resp.headers["Content-Disposition"] = (
-        f"attachment; filename=[SUMMARY] {user['fullname'] or user['nickname']} {year}-{month_from:02d}-{month_to:02d}.pdf"
+    return _set_download_filename(
+        resp,
+        f"[SUMMARY] {user['fullname'] or user['nickname']} {year}-{month_from:02d}-{month_to:02d}.pdf",
     )
-    return resp
 
 
 @app.get("/variable_rewards/print_all", endpoint="variable_rewards_print_all")
@@ -5095,10 +5087,7 @@ def variable_rewards_print_all():
     content = _report_to_pdf(report_title, rows)
     resp = make_response(content)
     resp.headers["Content-Type"] = "application/pdf"
-    resp.headers["Content-Disposition"] = (
-        f"attachment; filename=[VARIABLE REWARDS] {year}-{month:02d}.pdf"
-    )
-    return resp
+    return _set_download_filename(resp, f"[VARIABLE REWARDS] {year}-{month:02d}.pdf")
 
 
 @app.get("/variable_rewards/print/<int:user_id>", endpoint="variable_rewards_print")
@@ -5118,32 +5107,11 @@ def variable_rewards_print(user_id: int):
 
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT fullname, nickname FROM users WHERE id = ?", (user_id,))
+        cur.execute("SELECT id, fullname, nickname FROM users WHERE id = ?", (user_id,))
         user = cur.fetchone()
         if not user:
             flash("User not found.")
             return redirect(url_for("variable_rewards", month=month, year=year))
-
-        cur.execute(
-            """
-            SELECT month, computed_amount
-            FROM variable_rewards_snapshots
-            WHERE year = ? AND scope = 'monthly' AND user_id = ? AND month BETWEEN 1 AND ?
-            ORDER BY month ASC
-            """,
-            (year, user_id, month),
-        )
-        month_rows = cur.fetchall()
-
-        cur.execute(
-            """
-            SELECT computed_amount
-            FROM variable_rewards_snapshots
-            WHERE year = ? AND scope = 'yearly' AND user_id = ? AND month = ?
-            """,
-            (year, user_id, month),
-        )
-        ytd_row = cur.fetchone()
 
     month_names = [
         "", "January", "February", "March", "April", "May", "June",
@@ -5155,25 +5123,32 @@ def variable_rewards_print(user_id: int):
     rows.append([title, f"Up to {period_label}"])
     rows.append([])
     rows.append(["Month", "Amount"])
+    ytd_total = 0.0
+    month_rows = []
+    for selected_month in range(1, month + 1):
+        _, _, _, computed_users = _compute_variable_rewards_distribution(year, selected_month)
+        computed_user = next((u for u in computed_users if int(u["id"]) == int(user_id)), None)
+        computed_amount = float(computed_user["computed_amount"] or 0) if computed_user else 0.0
+        month_rows.append({"month": selected_month, "computed_amount": computed_amount})
+        ytd_total += computed_amount
+
     for r in month_rows:
         m = int(r["month"] or 0)
         label = f"{month_names[m]} {year}" if 1 <= m <= 12 else str(m)
         rows.append([label, f"{float(r['computed_amount'] or 0):.2f}"])
     rows.append([])
     rows.append(["Year-to-date total"])
-    if ytd_row and ytd_row["computed_amount"] is not None:
-        ytd_total = float(ytd_row["computed_amount"] or 0)
-    else:
-        ytd_total = sum(float(r["computed_amount"] or 0) for r in month_rows)
     rows.append([f"{ytd_total:.2f}"])
 
     content = _report_to_pdf(f"{title} ({period_label})", rows)
     resp = make_response(content)
     resp.headers["Content-Type"] = "application/pdf"
-    resp.headers["Content-Disposition"] = (
-        f"attachment; filename=[REWARDS] {user['fullname'] or user['nickname']} {year}-{month:02d}.pdf"
+    return _set_download_filename(
+        resp,
+        f"[REWARDS] {user['fullname'] or user['nickname']} {year}-{month:02d}.pdf",
     )
-    return resp
+
+
 @app.route("/airlines/<int:airline_id>/edit", methods=["GET", "POST"], endpoint="airlines_edit")
 @admin_required
 def airlines_edit(airline_id: int):

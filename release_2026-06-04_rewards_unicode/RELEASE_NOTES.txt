@@ -1,0 +1,15 @@
+﻿AirportApp release - 2026-06-04
+
+Changes:
+- Rewards reports now use live database values instead of saved snapshots.
+- Rewards PDFs show current monthly and year-to-date values for the selected period.
+- PDF/CSV downloads support Slovak diacritics and other Unicode characters in names.
+
+Customer update:
+1. Run install_update.exe.
+2. Select the folder that contains the customer's AirportApp.exe.
+3. The updater stops the app, backs up airport_app.db, and replaces AirportApp.exe.
+4. Existing customer data is preserved.
+
+Portable app:
+- AirportApp.exe is included for a fresh portable copy.

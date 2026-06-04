@@ -54,12 +54,36 @@ DB settings override ENV.
 ## Reports
 - Daily, Monthly, and Custom reports are generated from sales data.
 - Report creation is logged in `report_snapshots` for notifications.
+- Download filenames are generated with a safe ASCII fallback plus UTF-8
+  `filename*` support, so exports work with Slovak diacritics and other
+  Unicode characters in user names.
 
 ## Variable Rewards
 - Rewards are based on monthly airport fees.
 - Manual overrides per user are supported.
-- Snapshots are stored in `variable_rewards_snapshots`.
+- Current rewards screens and rewards PDF exports are calculated from live
+  database values, not from old saved snapshots.
+- Per-user rewards PDFs show monthly breakdown and year-to-date totals up to
+  the selected month, including partial current-month values.
+- Yearly rewards summary and per-user yearly summary PDFs support month ranges
+  and also use live database values.
+- Snapshots are still stored in `variable_rewards_snapshots` when using `Save`
+  and remain available as saved audit/history data.
 - Per-user and full-list PDF exports are available.
+
+## Build And Release
+- Portable executable: `installer\build_portable.bat`
+- Customer updater: `installer\build_update.bat`
+- The updater bundles the current `dist\AirportApp.exe`, stops the target app,
+  backs up `airport_app.db`, and replaces only `AirportApp.exe`.
+- Latest release folder: `release_2026-06-04_rewards_unicode`
+
+### 2026-06-04 Release
+- Rewards reports now use live database values instead of saved snapshots.
+- Rewards PDFs show current monthly and year-to-date values for the selected
+  period.
+- PDF/CSV downloads support Slovak diacritics and other Unicode characters in
+  names.
 
 ## Roles
 - Admin: full access

@@ -2,6 +2,15 @@
 
 Tento manual popisuje komplet funkcionalitu AirportApp pre End Usera aj Admina.
 
+## Aktualizacia 2026-06-04
+
+1. Rewards reporty uz citaju aktualne hodnoty priamo z databazy, nie zo starych snapshotov.
+2. PDF pre rewards zobrazuje mesacnu odmenu aj celkovu odmenu k vybranemu mesiacu.
+3. Yearly Rewards Summary aj Print PDF po useroch pouzivaju aktualne DB hodnoty za vybrany rozsah mesiacov.
+4. PDF/CSV exporty podporuju mena s diakritikou a inymi Unicode znakmi.
+5. Pri mene so slovenskymi znakmi sa pouzije bezpecny nazov suboru a download uz nema padat.
+6. Pre zakaznika je pripraveny updater v release priecinku `release_2026-06-04_rewards_unicode`.
+
 ## 1. Co je AirportApp
 
 1. AirportApp je lokalna desktop aplikacia spustena cez `AirportApp.exe`.
@@ -166,6 +175,14 @@ Tento manual popisuje komplet funkcionalitu AirportApp pre End Usera aj Admina.
 - PDF pre vsetkych,
 - PDF pre jedneho usera (`Print PDF` pri mene),
 - summary PDF za rozsah mesiacov.
+5. Dolezite spravanie reportov:
+- obrazovka Variable Rewards cita aktualne data z DB,
+- individualny `Print` cita aktualne data z DB za mesiace od januara po vybrany mesiac,
+- `Yearly Summary` cita aktualne data z DB za vybrany rozsah mesiacov,
+- `Yearly Summary -> Save PDF` cita aktualne data z DB,
+- `Yearly Summary -> Print PDF` pri userovi cita aktualne data z DB,
+- `Save` stale uklada snapshot do `variable_rewards_snapshots` ako historicky/audit zaznam.
+6. Ak su predaje za aktualny mesiac len do 3. dna v mesiaci, rewards PDF aj summary uz maju zobrazit tieto priebezne hodnoty.
 
 ## 12. Users a bezpecnost
 
@@ -269,6 +286,8 @@ Tento manual popisuje komplet funkcionalitu AirportApp pre End Usera aj Admina.
 1. Skontroluj, ci su data v zvolenom intervale.
 2. Skontroluj prava zapisovat do cieloveho priecinka.
 3. Vyskusaj iny priecinok (napr. Desktop).
+4. Exporty maju podporovat aj mena s diakritikou (`ľ`, `š`, `č`, `ť`, `ž`, `á`, `é`, `í`, `ó`, `ú`, `ý`, `ä`, `ô`, `ď`, `ň`, `ĺ`, `ŕ`).
+5. Ak download stale zlyha pri mene s diakritikou, over ze pouzivas build z release `release_2026-06-04_rewards_unicode` alebo novsi.
 
 ### 17.6 Updater zlyha
 
@@ -359,6 +378,17 @@ Tento manual popisuje komplet funkcionalitu AirportApp pre End Usera aj Admina.
 - Filter od-do mesiaca
 - Export celkoveho summary PDF
 - Print PDF po jednotlivych useroch
+
+7. Zdroj dat pre rewards reporty:
+- reporty a PDF pouzivaju aktualne hodnoty z DB,
+- nepouzivaju stare snapshoty ako zdroj vypoctu,
+- snapshot vzniknuty cez `Save` sluzi ako historicky/audit zaznam,
+- hodnoty za aktualny mesiac sa zobrazuju aj priebezne pred koncom mesiaca.
+
+8. Diakritika v menach:
+- PDF/CSV download funguje aj ked user vyplni meno so slovenskymi znakmi,
+- nazov suboru ma bezpecny ASCII fallback,
+- UTF-8 nazov sa posiela cez standardnu `filename*` HTTP hlavicku.
 
 ## 8. Sprava pouzivatelov (Admin/Deputy)
 
@@ -492,6 +522,8 @@ Tento manual popisuje komplet funkcionalitu AirportApp pre End Usera aj Admina.
 1. Skus iny prehliadac alebo povol pop-up/download.
 2. Skontroluj ci endpoint vracia PDF (network panel v browseri).
 3. Pozri `logs\\app.log` na server error.
+4. Ak sa to stane iba pri mene s diakritikou, aplikacia musi byt updatnuta na release `release_2026-06-04_rewards_unicode` alebo novsi.
+5. V novom builde sa nazov suboru generuje bezpecne aj pre slovenske pismena.
 
 ### 13.6 Update zlyhal
 
