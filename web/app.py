@@ -7,6 +7,7 @@ import sqlite3
 import sys
 import time
 import json
+import hashlib
 import logging
 import unicodedata
 from urllib.parse import quote
@@ -49,7 +50,13 @@ from database.db import (  # noqa: E402
     log_sales_event,
     set_app_state,
 )
-from utils.security import hash_password, verify_password_and_upgrade  # noqa: E402
+from utils.runtime_security import ensure_private_text_file, restrict_path_to_current_user  # noqa: E402
+from utils.security import (  # noqa: E402
+    hash_password,
+    hash_recovery_answer,
+    verify_password_and_upgrade,
+    verify_recovery_answer_and_upgrade,
+)
 from reportlab.lib.pagesizes import letter, A4, landscape
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -59,20 +66,30 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.textlabels import Label
 
+def _app_base_dir() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return PROJECT_ROOT
+
+
+def _load_secret_key() -> str:
+    env_secret = os.environ.get("SECRET_KEY", "").strip()
+    if env_secret:
+        return env_secret
+    return ensure_private_text_file(
+        os.path.join(_app_base_dir(), "airport_app.secret"),
+        lambda: token_urlsafe(48),
+    )
+
+
 app = Flask(__name__, template_folder=os.path.join(os.path.dirname(__file__), "templates"))
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-please-change")
+app.config["SECRET_KEY"] = _load_secret_key()
 app.config["SESSION_PERMANENT"] = True
 app.permanent_session_lifetime = timedelta(minutes=30)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 if os.environ.get("AIRPORTAPP_HTTPS", "").strip() == "1":
     app.config["SESSION_COOKIE_SECURE"] = True
-
-
-def _app_base_dir() -> str:
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
-    return PROJECT_ROOT
 
 
 def _configure_logging() -> None:
@@ -101,9 +118,51 @@ def _configure_logging() -> None:
         app.logger.addHandler(handler)
 
 
+def _harden_local_data_permissions() -> None:
+    if os.environ.get("AIRPORTAPP_SKIP_ACL_HARDEN", "").strip() == "1":
+        return
+    if not getattr(sys, "frozen", False) and os.environ.get("AIRPORTAPP_FORCE_ACL_HARDEN", "").strip() != "1":
+        return
+    base_dir = _app_base_dir()
+    for folder in (base_dir, os.path.join(base_dir, "backups"), os.path.join(base_dir, "logs")):
+        if os.path.exists(folder):
+            restrict_path_to_current_user(folder, is_dir=True)
+            for root, _dirs, files in os.walk(folder):
+                for name in files:
+                    restrict_path_to_current_user(os.path.join(root, name))
+    for path in (
+        get_db_path(),
+        os.path.join(base_dir, "airport_app.secret"),
+        os.path.join(base_dir, "app_runtime.json"),
+    ):
+        if os.path.exists(path):
+            restrict_path_to_current_user(path)
+
+
+def _migrate_recovery_answers_to_hashes() -> None:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, a1, a2, a3 FROM users")
+        rows = cur.fetchall()
+        for row in rows:
+            updates = {}
+            for col in ("a1", "a2", "a3"):
+                value = (row[col] or "").strip()
+                if value and not value.startswith(("$2a$", "$2b$", "$2y$")):
+                    updates[col] = hash_recovery_answer(value)
+            if not updates:
+                continue
+            set_parts = ", ".join(f"{col} = ?" for col in updates)
+            params = list(updates.values()) + [row["id"]]
+            cur.execute(f"UPDATE users SET {set_parts} WHERE id = ?", params)
+        conn.commit()
+
+
 _configure_logging()
 init_db()
 ensure_default_admin(hash_password)
+_migrate_recovery_answers_to_hashes()
+_harden_local_data_permissions()
 
 
 def _set_app_boot_id() -> str:
@@ -117,6 +176,8 @@ APP_BOOT_ID = _set_app_boot_id()
 
 PASSWORD_RE = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$")
 APPROVER_ROLES = {"Admin", "Deputy"}
+AUTH_RATE_LIMIT_WINDOW_SECONDS = 15 * 60
+AUTH_RATE_LIMIT_MAX_FAILURES = 5
 
 
 def _client_ip() -> Optional[str]:
@@ -125,6 +186,53 @@ def _client_ip() -> Optional[str]:
 
 def _user_agent() -> Optional[str]:
     return request.headers.get("User-Agent")
+
+
+def _rate_limit_key(scope: str, identifier: str | None) -> str:
+    ip = _client_ip() or "local"
+    raw = f"{scope}|{(identifier or '').casefold()}|{ip}"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return f"rate_limit:{scope}:{digest}"
+
+
+def _get_rate_limit_state(scope: str, identifier: str | None) -> tuple[str, dict[str, Any]]:
+    key = _rate_limit_key(scope, identifier)
+    raw = get_app_state(key)
+    if not raw:
+        return key, {"count": 0, "first_ts": 0}
+    try:
+        state = json.loads(raw)
+    except json.JSONDecodeError:
+        return key, {"count": 0, "first_ts": 0}
+    if not isinstance(state, dict):
+        return key, {"count": 0, "first_ts": 0}
+    return key, state
+
+
+def _rate_limit_is_blocked(scope: str, identifier: str | None) -> bool:
+    _key, state = _get_rate_limit_state(scope, identifier)
+    now_ts = int(time.time())
+    first_ts = int(state.get("first_ts") or 0)
+    count = int(state.get("count") or 0)
+    if first_ts <= 0 or now_ts - first_ts >= AUTH_RATE_LIMIT_WINDOW_SECONDS:
+        return False
+    return count >= AUTH_RATE_LIMIT_MAX_FAILURES
+
+
+def _rate_limit_record_failure(scope: str, identifier: str | None) -> None:
+    key, state = _get_rate_limit_state(scope, identifier)
+    now_ts = int(time.time())
+    first_ts = int(state.get("first_ts") or 0)
+    count = int(state.get("count") or 0)
+    if first_ts <= 0 or now_ts - first_ts >= AUTH_RATE_LIMIT_WINDOW_SECONDS:
+        state = {"count": 1, "first_ts": now_ts}
+    else:
+        state = {"count": count + 1, "first_ts": first_ts}
+    set_app_state(key, json.dumps(state, separators=(",", ":")))
+
+
+def _rate_limit_clear(scope: str, identifier: str | None) -> None:
+    delete_app_state(_rate_limit_key(scope, identifier))
 
 
 def _utc_now_iso() -> str:
@@ -2299,6 +2407,10 @@ def login():
         flash("❌ Please enter your name/nickname and password.")
         return redirect(url_for("index"))
 
+    if _rate_limit_is_blocked("login", identifier):
+        flash("Too many failed login attempts. Please wait 15 minutes and try again.")
+        return redirect(url_for("index"))
+
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -2309,10 +2421,12 @@ def login():
         row = cur.fetchone()
 
     if not row:
+        _rate_limit_record_failure("login", identifier)
         flash("❌ Invalid credentials")
         return redirect(url_for("index"))
 
     if int(row["approved"]) == 0:
+        _rate_limit_record_failure("login", identifier)
         flash("⏳ Your account is pending approval. Please contact Admin.")
         log_auth_event(
             user_id=row["id"],
@@ -2329,8 +2443,11 @@ def login():
 
     ok, upgraded_hash = verify_password_and_upgrade(password, row["password"])
     if not ok:
+        _rate_limit_record_failure("login", identifier)
         flash("❌ Invalid credentials")
         return redirect(url_for("index"))
+
+    _rate_limit_clear("login", identifier)
 
     if upgraded_hash:
         with get_connection() as conn:
@@ -2429,7 +2546,18 @@ def register():
                 )
                 VALUES (?, ?, ?, 'User', 0, 0, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (fullname, nickname, hash_password(password), now, q1, a1, q2, a2, q3, a3),
+                (
+                    fullname,
+                    nickname,
+                    hash_password(password),
+                    now,
+                    q1,
+                    hash_recovery_answer(a1),
+                    q2,
+                    hash_recovery_answer(a2),
+                    q3,
+                    hash_recovery_answer(a3),
+                ),
             )
             conn.commit()
     except Exception:
@@ -2457,12 +2585,17 @@ def forgot():
     require_csrf()
     nickname = _sanitize(request.form.get("nickname"))
 
+    if _rate_limit_is_blocked("forgot", nickname):
+        flash("Too many failed password reset attempts. Please wait 15 minutes and try again.")
+        return redirect(url_for("forgot"))
+
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("SELECT * FROM users WHERE nickname = ?", (nickname,))
         user = cur.fetchone()
 
     if not user:
+        _rate_limit_record_failure("forgot", nickname)
         flash("❌ User not found.")
         return redirect(url_for("forgot"))
 
@@ -2480,7 +2613,12 @@ def forgot():
             q3=user["q3"],
         )
 
-    if a1 != (user["a1"] or "") or a2 != (user["a2"] or "") or a3 != (user["a3"] or ""):
+    ok1, upgraded_a1 = verify_recovery_answer_and_upgrade(a1, user["a1"])
+    ok2, upgraded_a2 = verify_recovery_answer_and_upgrade(a2, user["a2"])
+    ok3, upgraded_a3 = verify_recovery_answer_and_upgrade(a3, user["a3"])
+
+    if not (ok1 and ok2 and ok3):
+        _rate_limit_record_failure("forgot", nickname)
         flash("❌ Answers do not match.")
         return redirect(url_for("forgot"))
 
@@ -2490,11 +2628,24 @@ def forgot():
 
     with get_connection() as conn:
         cur = conn.cursor()
+        if upgraded_a1 or upgraded_a2 or upgraded_a3:
+            cur.execute(
+                """
+                UPDATE users
+                SET a1 = COALESCE(?, a1),
+                    a2 = COALESCE(?, a2),
+                    a3 = COALESCE(?, a3)
+                WHERE id = ?
+                """,
+                (upgraded_a1, upgraded_a2, upgraded_a3, user["id"]),
+            )
         cur.execute(
             "UPDATE users SET password = ?, must_change_password = 0 WHERE id = ?",
             (hash_password(new_password), user["id"]),
         )
         conn.commit()
+
+    _rate_limit_clear("forgot", nickname)
 
     flash("✅ Password reset. You can login.")
     return redirect(url_for("index"))
@@ -4640,7 +4791,15 @@ def reset_user_questions(user_id: int):
 
         cur.execute(
             "UPDATE users SET q1 = ?, a1 = ?, q2 = ?, a2 = ?, q3 = ?, a3 = ? WHERE id = ?",
-            (q1, a1, q2, a2, q3, a3, user_id),
+            (
+                q1,
+                hash_recovery_answer(a1),
+                q2,
+                hash_recovery_answer(a2),
+                q3,
+                hash_recovery_answer(a3),
+                user_id,
+            ),
         )
         conn.commit()
 

@@ -12,6 +12,7 @@ from datetime import datetime
 from werkzeug.serving import make_server
 
 from web.app import app
+from utils.runtime_security import restrict_path_to_current_user
 
 
 def _runtime_dir() -> str:
@@ -25,6 +26,7 @@ def _write_crash_log(message: str) -> None:
     stamp = datetime.utcnow().isoformat() + "Z"
     with open(path, "a", encoding="utf-8") as f:
         f.write(f"[{stamp}] {message}\n")
+    restrict_path_to_current_user(path)
 
 
 def _show_error(message: str) -> None:
@@ -114,6 +116,7 @@ def main() -> None:
 
         with open(_runtime_state_path(), "w", encoding="utf-8") as f:
             json.dump({"host": host, "port": server.port, "pid": os.getpid()}, f)
+        restrict_path_to_current_user(_runtime_state_path())
 
         url = f"http://{host}:{server.port}"
         time.sleep(0.35)

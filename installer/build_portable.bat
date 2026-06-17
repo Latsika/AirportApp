@@ -34,7 +34,8 @@ echo.
 echo Build complete:
 echo   dist\AirportApp.exe
 echo.
-echo Copy AirportApp.exe to another Windows PC and double-click to start.
+echo For a fresh install, copy AirportApp.exe to the target folder and start it.
+echo For an existing customer, use install_update.exe or copy the whole app folder with airport_app.db.
 echo Python is NOT required on that PC.
 
 endlocal

@@ -1,555 +1,389 @@
-# Ticketing _AirportApp - User Manual
+# Ticketing AirportApp - User Manual
 
-Tento manual popisuje komplet funkcionalitu AirportApp pre End Usera aj Admina.
+Tento manual popisuje aktualne fungovanie AirportApp pre End Usera, Deputy a Admina.
 
-## Aktualizacia 2026-06-04
+## Aktualizacia 2026-06-17
 
-1. Rewards reporty uz citaju aktualne hodnoty priamo z databazy, nie zo starych snapshotov.
-2. PDF pre rewards zobrazuje mesacnu odmenu aj celkovu odmenu k vybranemu mesiacu.
-3. Yearly Rewards Summary aj Print PDF po useroch pouzivaju aktualne DB hodnoty za vybrany rozsah mesiacov.
-4. PDF/CSV exporty podporuju mena s diakritikou a inymi Unicode znakmi.
-5. Pri mene so slovenskymi znakmi sa pouzije bezpecny nazov suboru a download uz nema padat.
-6. Pre zakaznika je pripraveny updater v release priecinku `release_2026-06-04_rewards_unicode`.
+Security release `release_2026-06-17_security` prinasa:
+
+1. Per-install secret subor `airport_app.secret` namiesto pevneho Flask `SECRET_KEY`.
+2. Docasny 15-minutovy rate limit pre neuspesne login pokusy.
+3. Docasny 15-minutovy rate limit pre neuspesne resetovanie hesla cez security otazky.
+4. Security odpovede sa ukladaju ako bcrypt hashe.
+5. Existujuce plaintext security odpovede sa automaticky premigruju na hashe pri starte aplikacie.
+6. Portable/frozen app aplikuje best-effort Windows ACL ochranu na runtime subory.
+7. Aktualny release priecinok neobsahuje `airport_app.db`, aby sa neprepisali zakaznicke data.
 
 ## 1. Co je AirportApp
 
-1. AirportApp je lokalna desktop aplikacia spustena cez `AirportApp.exe`.
-2. Po spusteni sa app zobrazi v prehliadaci na lokalnej adrese `http://127.0.0.1:<port>`.
-3. Nepotrebuje instalovany Python na cielovom PC.
-4. Data su lokalne v SQLite databaze `airport_app.db` v tom istom priecinku ako `.exe`.
+1. AirportApp je lokalna desktop aplikacia spustana cez `AirportApp.exe`.
+2. Po spusteni sa zobrazi v prehliadaci na lokalnej adrese `http://127.0.0.1:<port>`.
+3. Server pocuva iba na `127.0.0.1`, takze nie je standardne dostupny z inych PC vo firemnej sieti.
+4. Na cielovom PC nie je potrebny Python.
+5. Data su lokalne v SQLite databaze `airport_app.db`.
 
-## 2. Co preniest na nove PC
+## 2. Subory a priecinky aplikacie
 
-1. Na bezne pouzitie prenasaj cely priecinok aplikacie, nie len `.exe`.
-2. Minimalne subory/priecinky:
-- `AirportApp.exe`
-- `airport_app.db` (ak uz mas data)
-- `backups\` (odporucane)
-- `logs\` (odporucane)
-3. Ak prenasas iba `AirportApp.exe` bez `airport_app.db`, vytvori sa nova prazdna databaza.
+Hlavne subory:
+
+```text
+AirportApp.exe
+airport_app.db
+airport_app.secret
+backups/
+logs/
+```
+
+Vyznam:
+
+- `AirportApp.exe`: samotna aplikacia.
+- `airport_app.db`: hlavna databaza, obsahuje users, airlines, sales, reports, rewards a nastavenia.
+- `airport_app.secret`: lokalny secret pre podpisovanie session cookies.
+- `backups/`: automaticke zalohy DB.
+- `logs/app.log`: technicke logy.
+- `app_runtime.json`: docasny subor s portom bezacej appky.
+- `crash.log`: vznikne iba pri kritickej chybe startu.
 
 ## 3. Spustenie aplikacie
 
-1. Dvojklik na `AirportApp.exe`.
-2. Otvori sa login stranka v prehliadaci.
-3. Pri starte app automaticky:
-- inicializuje DB schema (migracie bez straty dat),
-- vytvori/udrzi `logs\app.log`,
-- vykona automaticke kontroly notifikacii a report email scheduler.
+1. Skopiruj aplikaciu na lokalny disk.
+2. Dvojklik na `AirportApp.exe`.
+3. Otvori sa login stranka v prehliadaci.
+4. Pri starte app:
+- inicializuje alebo migruje DB schemu,
+- vytvori automaticku zalohu DB,
+- vytvori alebo nacita `airport_app.secret`,
+- premigruje stare plaintext security odpovede na hashe,
+- pripravi logy a notifikacne kontroly.
 
-## 4. Subory a priecinky, ktore app vytvara
+## 4. Prihlasenie, registracia, reset hesla
 
-1. `airport_app.db`:
-- hlavna databaza (users, airlines, sales, report snapshots, rewards, nastavenia).
-2. `backups\`:
-- automaticke zalohy databazy pri starte app,
-- zalohy pri update cez `install_update.exe`.
-3. `logs\app.log`:
-- technicke logy aplikacie.
-4. `crash.log`:
-- vznikne pri kritickej chybe startu.
+### 4.1 Login
 
-## 5. Prihlasenie, registracia, reset hesla
+Login polia:
 
-1. Login polia:
 - `Name or Nickname`
 - `Password`
-2. Pri novej prazdnej DB sa vytvori default admin:
-- Nickname: `Admin`
-- Password: `12345`
-3. Pri prvom logine je mozne vynutene zmenit heslo.
-4. `Sign Up`:
-- registracia noveho usera,
-- ucet caka na schvalenie (`Admin` alebo `Deputy`).
-5. `Forgot Password`:
-- obnova cez bezpecnostne otazky.
-6. Auto logout:
-- session timeout po 30 minutach neaktivity.
 
-## 6. Role a opravnenia
+Ak je databaza prazdna, vytvori sa default admin:
 
-1. `User`:
+```text
+Nickname: Admin
+Password: 12345
+```
+
+Pri prvom prihlaseni je vynutena zmena hesla.
+
+### 4.2 Rate limit
+
+Po 5 neuspesnych login pokusoch v 15 minutach aplikacia docasne odmietne dalsie pokusy.
+
+Dolezite:
+
+- ucet sa tym natrvalo nezablokuje,
+- po 15 minutach je mozne skusit login znova,
+- uspesny login resetuje pocitadlo neuspesnych pokusov.
+
+### 4.3 Sign Up
+
+1. Pouzivatel vyplni meno, nickname, heslo a 3 security otazky.
+2. Novy ucet caka na schvalenie.
+3. Schvalit ho moze Admin alebo Deputy.
+
+### 4.4 Forgot Password
+
+1. Pouzivatel zada nickname.
+2. Aplikacia zobrazi security otazky.
+3. Po spravnych odpovediach si pouzivatel nastavi nove heslo.
+4. Aj reset hesla ma 15-minutovy rate limit pri neuspesnych pokusoch.
+
+Security odpovede su ulozene ako bcrypt hashe, nie ako citatelny text.
+
+## 5. Role a opravnenia
+
+### User
+
 - predaj,
-- reporty podla dostupnych menu.
-2. `Deputy`:
-- schvalovanie userov.
-3. `Admin`:
-- plna sprava users, airlines, fees, sales edit/delete, reports, notifications, variable rewards, account settings.
+- dostupne reporty podla menu,
+- vlastny profil a zmena hesla.
 
-## 7. Predaj (Sales)
+### Deputy
 
-### 7.1 New Sale
+- schvalovanie novych pouzivatelov,
+- standardne pouzivatelske workflow.
+
+### Admin
+
+- plna sprava pouzivatelov,
+- airlines, destinations, airline fees,
+- airport service fees,
+- sales edit/delete,
+- reports,
+- notifications,
+- variable rewards,
+- account settings,
+- DB export.
+
+## 6. Predaj
+
+### 6.1 New Sale
 
 1. Otvor `Sales -> New Sale`.
 2. Vyber airline.
 3. Vyber destination.
-4. Zadaj volitelne:
-- PNR
-- Passenger name
-5. Vyber poplatky:
+4. Volitelne zadaj:
+- PNR,
+- passenger name.
+5. Vyber polozky:
 - airline fees,
-- airport service fees.
+- airport service fees,
+- plane ticket amount/quantity, ak sa pouziva.
 6. Vyber platbu:
-- `CASH` alebo `CARD`.
+- `CASH`,
+- `CARD`.
 7. Uloz predaj.
-8. Kazda polozka sa uklada ako samostatny riadok v sale items.
 
-### 7.2 Sales List
+Kazda polozka predaja sa uklada do `sale_items`.
+
+### 6.2 Sales List
 
 1. Otvor `Sales -> Sales List`.
-2. Filtrovanie/hladanie podla PNR alebo mena.
-3. Akcie:
-- `Edit` predaja,
-- `Delete` predaja (admin).
-4. Zmeny sa ukladaju do sales logov.
+2. Filtrovanie je dostupne podla PNR, passenger name, destination, seller a textoveho hladania.
+3. `Edit` upravi predaj.
+4. `Delete` je admin akcia.
+5. Zmeny sa loguju do sales logov.
 
-## 8. Airlines, destinations, fees (Admin)
+## 7. Airlines, destinations a fees
 
-1. `Airlines`:
-- pridanie airline,
-- edit airline,
-- delete airline.
-2. `Airline Destinations`:
-- pridanie destinacie (nazov + IATA kod, napr. `KSC`, `BTS`),
-- edit/delete destinacie.
-3. `Airline Fees`:
-- pridanie fee pre konkretnu airline,
-- edit/delete fee.
-4. `Airport Service Fees`:
-- centralne letiskove poplatky,
-- edit/delete.
+Admin spravuje:
 
-## 9. Co sa stane pri zmene ceny fee
+- Airlines,
+- Airline destinations,
+- Airline fees,
+- Airport service fees.
 
-1. Zmena ceny fee neprepise historicke predaje.
-2. Historicke zaznamy ostanu s povodnou cenou.
-3. Nove predaje po zmene pouziju novu cenu.
+Zmena ceny fee neprepise historicke predaje. Historicke zaznamy ostanu s povodnou cenou, nove predaje pouziju aktualnu cenu.
 
-## 10. Reports
+## 8. Reporty
 
-### 10.1 Typy reportov
+### 8.1 Typy reportov
 
-1. `Daily Report`
-2. `Monthly Report`
-3. `Custom Report`
+- Daily Report
+- Monthly Report
+- Custom Report
 
-### 10.2 Exporty
+### 8.2 Exporty
 
-1. Reporty sa daju exportovat do:
-- PDF
-- CSV (kde je podporovane).
-2. Vytvorenie reportu sa uklada do `report_snapshots`.
+Reporty sa daju exportovat do PDF a CSV, podla konkretnej obrazovky.
 
-### 10.3 Custom Report logika (dolezite)
+Download podporuje mena s diakritikou a Unicode znakmi. Aplikacia pouziva bezpecny ASCII fallback a UTF-8 `filename*` HTTP hlavicku.
 
-1. Ak vyberies iba airline fees pre konkretnu airline:
-- v reporte aj PDF sa zobrazia len tieto airline fees.
-- nezobrazi sa zavadzajuca sekcia navyse.
-2. Ak vyberies airline fees + airport fees:
-- report zobrazi airline fees,
-- plus suhrn `All Fees Total` (airline + airport).
-3. V detail sekcii `Airline Detail Report` je aj destination code:
-- UI, CSV aj PDF obsahuje kratky kod (napr. `KSC`, `BTS`).
-4. Detailny zoznam obsahuje:
-- Date (kazda predana polozka solo riadok),
-- PNR,
-- Passenger Name,
-- Airline Fee,
-- Destination (code),
-- Amount,
-- Cash/Card.
-5. Na konci su totaly:
-- total za kazdy fee typ zvlast,
-- finalny celkovy total.
+### 8.3 Custom Report
 
-## 11. Variable Rewards
+Custom report podporuje filtre:
 
-1. `Variable Rewards` pracuje s mesiacom/rokom.
-2. Vypocet je naviazany na airport fees total za zvoleny mesiac.
-3. Moznosti:
-- aktivovat/deaktivovat usera pre rewards,
-- nastavit globalne percento,
-- manualne upravit odmenu pre konkretneho usera,
-- `Save` snapshotu.
-4. Exporty:
+- date from / date to,
+- airline / airport fees,
+- destination,
+- service/fee,
+- sold by,
+- payment method.
+
+Spravanie:
+
+- ak su vybrane iba airline fees, report zobrazi iba airline cast,
+- ak su vybrane airline aj airport fees, report zobrazi kombinovane totaly,
+- destination sa v detailoch zobrazuje ako kod, napr. `KSC`, `BTS`.
+
+## 9. Variable Rewards
+
+1. Rewards su naviazane na airport service fees za vybrany mesiac.
+2. Admin moze nastavit:
+- aktivny/neaktivny user pre rewards,
+- globalne percento,
+- manualnu sumu pre konkretneho usera.
+3. `Save` uklada snapshot ako audit/historiu.
+4. Obrazovky a PDF exporty pocitaju z aktualnych live DB hodnot.
+5. Dostupne exporty:
 - PDF pre vsetkych,
-- PDF pre jedneho usera (`Print PDF` pri mene),
-- summary PDF za rozsah mesiacov.
-5. Dolezite spravanie reportov:
-- obrazovka Variable Rewards cita aktualne data z DB,
-- individualny `Print` cita aktualne data z DB za mesiace od januara po vybrany mesiac,
-- `Yearly Summary` cita aktualne data z DB za vybrany rozsah mesiacov,
-- `Yearly Summary -> Save PDF` cita aktualne data z DB,
-- `Yearly Summary -> Print PDF` pri userovi cita aktualne data z DB,
-- `Save` stale uklada snapshot do `variable_rewards_snapshots` ako historicky/audit zaznam.
-6. Ak su predaje za aktualny mesiac len do 3. dna v mesiaci, rewards PDF aj summary uz maju zobrazit tieto priebezne hodnoty.
+- PDF pre jedneho usera,
+- yearly summary PDF za rozsah mesiacov.
 
-## 12. Users a bezpecnost
+## 10. Users a security administracia
 
-1. `Users`:
-- schvalit cakatelov,
+Admin/Deputy:
+
+- schvalenie cakajucich uctov.
+
+Admin:
+
 - edit usera,
+- delete usera,
 - reset hesla,
 - reset security otazok,
-- delete usera.
-2. `User logs`:
-- auth historia,
-- sales aktivita.
-3. `Reassign Admin`:
-- presun admin prav na iny ucet.
+- user logs,
+- reassign admin.
 
-## 13. Notifications a emaily
+Reset security otazok ulozi nove odpovede ako bcrypt hashe.
 
-1. Nastavenie prijemcov:
-- `Notifications` obrazovka, max 10 email adries.
-2. Notification templates:
-- vytvorenie/uprava sablon.
-3. SMTP:
-- `Account Settings -> SMTP`.
-4. Odosielatel emailu:
-- priorita:
-  - `smtp_sender` z app settings,
-  - inak `SMTP_SENDER` z prostredia,
-  - inak SMTP user,
-  - fallback `no-reply@airportapp.local`.
+## 11. Notifications a SMTP
 
-## 14. Automaticke denny/mesacny report email
+### 11.1 Recipients
 
-1. Scheduler sa spusta automaticky pri aktivite app (before request).
-2. Denny report:
-- posiela sa po 00:05 lokalneho casu za predchadzajuci den.
-3. Mesacny report:
-- posiela sa po 00:05 prveho dna noveho mesiaca za predchadzajuci mesiac.
-4. Catch-up mechanizmus:
-- ak app nebezala a reporty sa neposlali, po dalsom spusteni/dopyte ich doposle.
-5. Email obsahuje PDF prilohu reportu.
-6. Duplicity sa blokuju cez snapshot kluce:
-- `daily_auto_email`,
-- `monthly_auto_email`.
+V `Notifications` je mozne nastavit max 10 prijemcov.
 
-## 15. Account Settings (Admin)
+### 11.2 Templates
 
-1. SMTP konfiguracia:
-- host, port, user, password, sender, TLS.
-2. DB export:
-- stiahnutie aktualnej `airport_app.db`.
+Notification templates sa daju vytvarat, upravovat a zapinat/vypinat.
 
-## 16. Update bez straty dat
+### 11.3 SMTP
 
-### 16.1 Standardny postup cez updater
+SMTP je v `Account settings`.
 
-1. Pouzi `install_update.exe`.
+Polia:
+
+- SMTP host,
+- SMTP port,
+- SMTP user,
+- SMTP password,
+- sender,
+- TLS.
+
+SMTP heslo je ulozene v aplikacnej DB. Preto treba chranit `airport_app.db` a neposielat ju zbytocne mimo firmy.
+
+## 12. Automaticke report emaily
+
+1. Scheduler bezi pri aktivite aplikacie.
+2. Daily report sa posiela po nastavenom case za predchadzajuci den.
+3. Monthly report sa posiela po nastavenom case za predchadzajuci mesiac.
+4. Ak app nebezala, catch-up mechanizmus doposle chybajuce reporty po dalsom spusteni/pouziti.
+5. Duplicity sa blokuju cez snapshot/app state kluce.
+
+## 13. Account Settings
+
+Admin ma dostupne:
+
+- SMTP konfiguraciu,
+- notification nastavenia,
+- DB export.
+
+DB export stiahne aktualny `airport_app.db`.
+
+## 14. Prenos na nove PC
+
+Na prenos existujucej instalacie kopiruj cely priecinok aplikacie.
+
+Minimalne:
+
+```text
+AirportApp.exe
+airport_app.db
+airport_app.secret
+backups/
+```
+
+Ak sa prenesie iba `AirportApp.exe`, aplikacia moze vytvorit novu prazdnu DB a povodne ucty nebudu dostupne.
+
+Odporucanie:
+
+1. Zatvor AirportApp.
+2. Skopiruj cely priecinok na USB.
+3. Na novom PC ho skopiruj z USB na lokalny disk.
+4. Spust `AirportApp.exe` z lokalneho disku.
+
+## 15. Update bez straty dat
+
+Na existujuceho zakaznika pouzi:
+
+```text
+install_update.exe
+```
+
+Postup:
+
+1. Spusti `install_update.exe`.
 2. Vyber priecinok, kde je existujuci `AirportApp.exe`.
-3. Updater:
-- zastavi beziaci proces app,
-- spravi zalohu DB do `backups\airport_app_update_<timestamp>.db`,
-- nahradi iba `AirportApp.exe`.
-4. Data (users, airlines, sales, reports, rewards) ostanu zachovane.
+3. Updater zastavi beziacu appku.
+4. Updater spravi backup `airport_app.db`.
+5. Updater nahradi iba `AirportApp.exe`.
+6. `airport_app.db`, `airport_app.secret` a `backups/` ostavaju v zakaznickom priecinku.
 
-### 16.2 Co posielat uzivatelovi
+Neprepisuj zakaznikovu databazu release/test databazou.
 
-1. Na bezny update staci poslat `install_update.exe`.
-2. Na novu instalaciu (first run) posli balik s `AirportApp.exe`.
+## 16. Build a release pre developera
+
+Portable build:
+
+```powershell
+installer\build_portable.bat
+```
+
+Updater build:
+
+```powershell
+installer\build_update.bat
+```
+
+Vystupy:
+
+```text
+dist/AirportApp.exe
+dist/install_update.exe
+```
+
+Aktualny release:
+
+```text
+release_2026-06-17_security/
+  AirportApp.exe
+  install_update.exe
+  RELEASE_NOTES.txt
+```
+
+Release priecinok nema obsahovat `airport_app.db`, pokial nejde vyslovene o demo/fresh install balik.
 
 ## 17. Troubleshooting
 
-### 17.1 App sa nespusti
+### Invalid credentials
 
-1. Skontroluj, ci mas pravo zapisovat do priecinka aplikacie.
-2. Skontroluj `crash.log` v priecinku app.
-3. Skontroluj `logs\app.log`.
-4. Ak je priecinok read-only (napr. USB s ochranou), spusti app z lokalneho disku.
+1. Skontroluj nickname/full name.
+2. Skontroluj Caps Lock a klavesnicu.
+3. Skontroluj, ci sa spusta appka v priecinku so spravnou `airport_app.db`.
+4. Pri novej prazdnej DB skus `Admin / 12345`.
+5. Pouzi `Forgot Password` alebo Admin reset hesla.
 
-### 17.2 Chyba `no such table: app_state`
+### Too many failed login attempts
 
-1. Znamena to nekonzistentnu alebo staru DB schema.
-2. Riesenie:
-- spusti novu verziu `AirportApp.exe` v priecinku s platnou `airport_app.db`,
-- ak chyba trva, obnov DB zo `backups\`.
+1. Pockaj 15 minut.
+2. Skus znova so spravnym menom/heslom.
+3. Ak heslo nie je zname, pouzi `Forgot Password` alebo Admin reset.
 
-### 17.3 Login hlasi `Invalid credentials`
+### App sa nespusti
 
-1. Over presny `Name or Nickname`.
-2. Skontroluj velkost pismen a rozlozenie klavesnice.
-3. Pouzi `Forgot Password`.
-4. Admin moze resetnut heslo v `Users`.
+1. Pozri `crash.log`.
+2. Pozri `logs/app.log`.
+3. Skontroluj prava na zapis do priecinka.
+4. Skopiruj aplikaciu z USB na lokalny disk.
+5. Over antivirus/firemne politiky.
 
-### 17.4 Neodosielaju sa email reporty/notifikacie
+### Updater zlyha
 
-1. Over SMTP (`host`, `port`, `user`, `password`, TLS).
-2. Over, ze su nastavene recipient emaily.
-3. Over internet konektivitu a firewall pre SMTP port.
-4. Pozri `logs\app.log` na SMTP chyby.
+1. Zatvor AirportApp.
+2. Over Task Manager, ci nebezi `AirportApp.exe`.
+3. Spusti updater s pravom zapisovat do cieloveho priecinka.
+4. Vyber spravny priecinok s `AirportApp.exe`.
 
-### 17.5 PDF/CSV sa nevygeneruje
+### Emaily sa neposielaju
 
-1. Skontroluj, ci su data v zvolenom intervale.
-2. Skontroluj prava zapisovat do cieloveho priecinka.
-3. Vyskusaj iny priecinok (napr. Desktop).
-4. Exporty maju podporovat aj mena s diakritikou (`ľ`, `š`, `č`, `ť`, `ž`, `á`, `é`, `í`, `ó`, `ú`, `ý`, `ä`, `ô`, `ď`, `ň`, `ĺ`, `ŕ`).
-5. Ak download stale zlyha pri mene s diakritikou, over ze pouzivas build z release `release_2026-06-04_rewards_unicode` alebo novsi.
+1. Skontroluj SMTP.
+2. Skontroluj recipients.
+3. Over firewall/proxy.
+4. Pozri `logs/app.log`.
 
-### 17.6 Updater zlyha
+## 18. Prevadzka
 
-1. Zavri beziaci AirportApp.
-2. Spusti `install_update.exe` ako user s pravami zapisovat do cieloveho priecinka.
-3. Over, ze vyberas priecinok, kde je `AirportApp.exe`.
-4. Ak je `.exe` blokovane antivirusom, povol vynimku.
-
-### 17.7 App z USB je pomala alebo nestabilna
-
-1. Je to mozne pri pomalom USB.
-2. Odporucanie:
-- pouzivat z lokalneho SSD/HDD,
-- USB pouzit primarne na prenos.
-
-## 18. Prevadzkove odporucania
-
-1. Pravidelne kopiruj `airport_app.db` a `backups\` mimo zariadenia.
-2. Pred kazdym update nechaj app zatvorenu.
-3. Pravidelne kontroluj `logs\app.log`.
-4. Testuj report export (PDF/CSV) po vacsich zmenach konfiguracie.
-
-## 19. Rychly checklist pre End Usera
-
-1. Spustit `AirportApp.exe`.
-2. Prihlasit sa.
-3. Zadavat predaje (airline, destination, fee, payment).
-4. Vygenerovat reporty podla potreby (daily/monthly/custom).
-5. Pri update spustit `install_update.exe` a vybrat priecinok aplikacie.
-6. Neriesit manualnu migraciu DB, robi sa automaticky.
-- Delete sale (podla role)
-
-## 6. Reporty
-
-### 6.1 Daily Report
-
-1. Otvor `Reports -> Daily`.
-2. Vyber datum.
-3. Moznosti exportu:
-- CSV
-- PDF
-
-### 6.2 Monthly Report
-
-1. Otvor `Reports -> Monthly`.
-2. Vyber mesiac.
-3. Moznosti exportu:
-- CSV
-- PDF
-
-### 6.3 Custom Report
-
-1. Otvor `Reports -> Custom`.
-2. Nastav filtre:
-- Date from / Date to
-- Airline / Airport fees
-- Destination
-- Service/Fee
-- Sold by
-- Payment method
-
-3. Klikni `Load report`.
-4. Klikni `SAVE` pre PDF alebo `Export .csv`.
-
-5. Dolezite spravanie totalov:
-- Ak vyberies iba airline fees, report ukaze iba airline casti.
-- `All Fees Total` sa zobrazi len pri kombinacii airline + airport fees.
-
-6. V `Airline Detail Report` je stlpec `Destination` iba ako kod (napr. `KSC`, `BTS`), rovnako v CSV aj PDF.
-
-## 7. Variable Rewards
-
-1. Otvor `Variable rewards of users`.
-2. Vyber mesiac a rok.
-3. Aplikacia pocita rewards z airport fees.
-4. Mozes:
-- Nastavit percento
-- Nastavit manualnu sumu na usera
-- Aktivovat/deaktivovat usera pre rewards
-
-5. Tlacidla:
-- `Save`
-- `Save PDF` (vsetci)
-- `Print` / `Print PDF` pre konkretneho usera
-- `Yearly Summary`
-
-6. Yearly Summary:
-- Filter od-do mesiaca
-- Export celkoveho summary PDF
-- Print PDF po jednotlivych useroch
-
-7. Zdroj dat pre rewards reporty:
-- reporty a PDF pouzivaju aktualne hodnoty z DB,
-- nepouzivaju stare snapshoty ako zdroj vypoctu,
-- snapshot vzniknuty cez `Save` sluzi ako historicky/audit zaznam,
-- hodnoty za aktualny mesiac sa zobrazuju aj priebezne pred koncom mesiaca.
-
-8. Diakritika v menach:
-- PDF/CSV download funguje aj ked user vyplni meno so slovenskymi znakmi,
-- nazov suboru ma bezpecny ASCII fallback,
-- UTF-8 nazov sa posiela cez standardnu `filename*` HTTP hlavicku.
-
-## 8. Sprava pouzivatelov (Admin/Deputy)
-
-1. `Users` zoznam:
-- pending approval
-- approved users
-
-2. Akcie:
-- Approve
-- Edit user
-- Delete user (Admin)
-- Reset password (Admin)
-- Reset security questions
-- User logs
-
-3. Reassign admin:
-- Ak ostava posledny admin, system nedovoli jeho odstranenie bez reassignmentu.
-
-## 9. Sprava airlines, fees a destinations (Admin)
-
-1. Airlines:
-- Add airline
-- Edit airline
-- Delete airline
-
-2. Airline fees:
-- Add/Edit/Delete fee
-- Kluc fee (`fee_key`) ma byt unikatny v ramci airline
-
-3. Airport service fees:
-- Add/Edit/Delete globalnych airport fee poloziek
-
-4. Destinations:
-- Add/Edit/Delete destination pre konkretnu airline
-- V reporte sa pouzivaju destination kody
-
-## 10. Notifikacie a emaily
-
-### 10.1 SMTP
-
-1. Otvor `Account settings`.
-2. Vypln:
-- SMTP host
-- SMTP port
-- SMTP user
-- SMTP password
-- Sender (odporucane)
-- TLS on/off
-
-3. Uloz `Save SMTP`.
-
-### 10.2 Notification recipients
-
-1. Otvor `Create notifications`.
-2. Nastav emaily prijemcov.
-3. Nastav/aktivuj sablony notifikacii.
-
-### 10.3 Automaticke report emaily
-
-1. Daily PDF report:
-- odoslanie po `00:05` nasledujuceho dna
-- ak app nebezala, po spusteni dobehne chybajuce dni (catch-up)
-
-2. Monthly PDF report:
-- odoslanie po `00:05` po zmene mesiaca
-- po spusteni app dobehne chybajuce mesiace (catch-up)
-
-3. Priloha:
-- automaticke daily/monthly reporty posielaju PDF v prilohe
-
-4. Bezne textove notifikacie:
-- created/not_created udalosti mozu byt bez prilohy (podla typu notifikacie)
-
-## 11. Data, zalohy a prenos
-
-1. Vsetky data su lokalne v `airport_app.db`.
-2. Pri starte sa robi automaticka zalohova kopia DB do `backups`.
-3. Retencia zaloh je obmedzena (stare sa mazu automaticky).
-4. Pri prenose na iny PC:
-- Ak chces prenies data, prenes `AirportApp.exe` aj `airport_app.db`.
-- Ak prenesies iba EXE, vytvori sa nova prazdna DB.
-
-## 12. Update aplikacie bez straty dat
-
-1. Dostanes `install_update.exe`.
-2. Spustis `install_update.exe`.
-3. Vyberies priecinok, kde je aktualny `AirportApp.exe`.
-4. Updater:
-- zastavi beziaci proces
-- spravi DB backup
-- nahradi iba `AirportApp.exe`
-- ponecha `airport_app.db`
-
-5. Po update ostanu zachovane:
-- users
-- airlines
-- fees
-- predaje
-- report data
-
-## 13. Troubleshooting
-
-### 13.1 Invalid credentials pri logine
-
-1. Skontroluj velkost pismen v mene/nicku.
-2. Pri novej DB skus `Admin / 12345`.
-3. Ak stale nefunguje, skontroluj ci nepouzivas iny priecinok s inou DB.
-
-### 13.2 Aplikacia sa nespusti
-
-1. Pozri `crash.log` v priecinku aplikacie.
-2. Skontroluj prava na zapis do priecinka.
-3. Spusti z lokalneho disku (niekedy firemne politiky blokuju spustenie z USB).
-
-### 13.3 Emaily sa neposielaju
-
-1. Skontroluj SMTP host/port/user/password.
-2. Skontroluj sender email.
-3. Skontroluj zoznam recipients v notifications.
-4. Over firewall/proxy.
-5. Pozri `logs\\app.log`.
-
-### 13.4 Report email neprisiel o 00:05
-
-1. App musi bezat alebo sa musi spustit neskor (catch-up).
-2. Po spusteni app scheduler dobehne chybajuce reporty.
-3. Over SMTP a recipients.
-
-### 13.5 Print PDF sa toci a nic
-
-1. Skus iny prehliadac alebo povol pop-up/download.
-2. Skontroluj ci endpoint vracia PDF (network panel v browseri).
-3. Pozri `logs\\app.log` na server error.
-4. Ak sa to stane iba pri mene s diakritikou, aplikacia musi byt updatnuta na release `release_2026-06-04_rewards_unicode` alebo novsi.
-5. V novom builde sa nazov suboru generuje bezpecne aj pre slovenske pismena.
-
-### 13.6 Update zlyhal
-
-1. Zatvor beziaci `AirportApp.exe`.
-2. Spusti `install_update.exe` znova.
-3. Over, ze cielovy priecinok obsahuje `AirportApp.exe`.
-
-### 13.7 Data po update "zmizli"
-
-1. Pravdepodobne sa app spustila v inom priecinku s inou DB.
-2. Skontroluj kde je pouzivane `airport_app.db`.
-3. Obnov DB z `backups`.
-
-## 14. Odporucany denny postup pre obsluhu
-
-1. Prihlasit sa.
-2. Evidovat predaje priebezne cez `New Sale`.
-3. Kontrolovat `Sales List`.
-4. Na konci smeny skontrolovat Daily report.
-5. Pravidelne kontrolovat notifikacie a logs.
-
-## 15. Kontakt pre podporu
-
-Pri incidente priprav pre support:
-1. screenshot chyby,
-2. cas udalosti,
-3. poslednych 50-100 riadkov z `logs\\app.log`,
-4. informaciu, ci islo o lokalne alebo USB spustenie,
-5. verziu EXE / datum update.
+1. Pravidelne zalohuj `airport_app.db` a `backups/` mimo zariadenia.
+2. Pred update zatvor aplikaciu.
+3. Produkcnu aplikaciu nespustaj dlhodobo z USB.
+4. Pri presune kopiruj cely priecinok.
+5. Neposielaj hesla cez email alebo chat.

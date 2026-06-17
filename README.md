@@ -1,95 +1,201 @@
 # AirportApp
 
 ## Overview
-AirportApp is a Flask-based desktop web app for airport sales, reports, and variable rewards.
-Data is stored in a local SQLite database (airport_app.db).
 
-## Run (Development)
+AirportApp is a local Windows portable desktop web app for airport sales, reports, notifications, and variable rewards.
+
+The app is packaged as `AirportApp.exe`. When launched, it starts a local Flask server and opens the browser at:
+
+```text
+http://127.0.0.1:<port>
+```
+
+The server is bound to `127.0.0.1`, so it is not exposed to other computers on the company network by default.
+
+## Current Release
+
+Latest release folder:
+
+```text
+release_2026-06-17_security
+```
+
+Release contents:
+
+```text
+AirportApp.exe
+install_update.exe
+RELEASE_NOTES.txt
+```
+
+This release folder intentionally does not include `airport_app.db`. Existing customer data must not be overwritten by a release or test database.
+
+## Data Storage
+
+Main customer data is stored in:
+
+```text
+airport_app.db
+```
+
+For the portable/frozen app, this database must be in the same folder as:
+
+```text
+AirportApp.exe
+```
+
+Runtime files:
+
+- `airport_app.db`: main SQLite database
+- `airport_app.secret`: per-install Flask session signing secret
+- `backups/`: automatic database backups
+- `logs/app.log`: application log
+- `app_runtime.json`: current local server port while the app is running
+- `crash.log`: startup crash details, only created after a fatal startup error
+
+Automatic DB backups are created on app startup in `backups/`. Backup retention keeps up to 30 automatic DB backups.
+
+Transfer and recovery guide: see `TROUBLESHOOTING.md`.
+
+## Security Behavior
+
+- The app no longer uses a fixed Flask `SECRET_KEY` fallback.
+- On first run, the app creates `airport_app.secret` next to `AirportApp.exe`.
+- Failed login attempts are temporarily rate-limited: 5 failed attempts per user/IP scope in 15 minutes.
+- Failed password reset attempts are also temporarily rate-limited for 15 minutes.
+- Security question answers are stored as bcrypt hashes.
+- Existing plaintext security answers are migrated to bcrypt hashes on app startup.
+- In the frozen portable app, the app applies best-effort Windows ACL hardening to local runtime files and folders.
+
+Important: `airport_app.secret` is not customer business data, but it is security-sensitive. When moving an existing installation, copy the whole app folder so sessions and local security state remain consistent.
+
+## Run Development Version
+
 From the project root:
 
 ```powershell
-python web\app.py
+.\.venv\Scripts\python.exe web\app.py
 ```
 
-The app runs locally and is accessed in a browser.
+Environment variables:
 
-## Data Storage
-- Main database: `airport_app.db`
-- Automatic backups: created on every app start in `backups/`
-- Backup retention: max 30 files (oldest deleted)
+- `AIRPORTAPP_DEBUG=1`: enables Flask debug mode.
+- `AIRPORTAPP_HTTPS=1`: sets secure cookies for HTTPS deployments.
+- `AIRPORTAPP_DB_PATH`: overrides the SQLite DB path for testing.
+- `SECRET_KEY`: overrides the local generated secret, mainly for tests.
+- `AIRPORTAPP_SKIP_ACL_HARDEN=1`: skips ACL hardening during tests.
+- `AIRPORTAPP_FORCE_ACL_HARDEN=1`: forces ACL hardening in non-frozen development runs.
 
-## Environment Variables
+## SMTP And Notifications
 
-### App
-- `AIRPORTAPP_DEBUG=1` enables Flask debug mode.
-- `AIRPORTAPP_HTTPS=1` sets secure cookies (for HTTPS).
-- `AIRPORTAPP_DB_PATH` overrides the SQLite DB path (useful for tests).
+If SMTP is not configured, emails are not sent, but in-app popup notifications still work.
 
-### SMTP (email notifications)
-If not set, emails are not sent (popup still works).
+SMTP can be configured in `Account settings` and is stored in the app database:
+
+- SMTP host
+- SMTP port
+- SMTP user
+- SMTP password
+- sender
+- TLS on/off
+
+SMTP can also be provided through environment variables:
 
 - `SMTP_HOST`
 - `SMTP_PORT` (default 587)
 - `SMTP_USER`
 - `SMTP_PASSWORD`
-- `SMTP_SENDER` (optional)
+- `SMTP_SENDER`
 
-Note: SMTP can also be configured in **Account settings** (stored in DB).
-DB settings override ENV.
+DB settings override environment values where both are present.
 
-## Notifications
-- Email recipients: configurable in **Account settings -> Create notifications** (max 10 addresses).
-- Notification templates: editable and extendable in the same section.
-- Pop-up notifications: shown to Admin on first app open after the check time.
-- Email summary: sent together with the popup.
+Notification triggers include:
 
-### Triggers
-- New user created (waiting approval)
-- Daily report created (on export)
-- Monthly report created (on export)
-- Daily report NOT created (checked after 08:00, Europe/Bratislava)
-- Monthly report NOT created (first day of month, after 08:00)
-- User deleted
-
-## Reports
-- Daily, Monthly, and Custom reports are generated from sales data.
-- Report creation is logged in `report_snapshots` for notifications.
-- Download filenames are generated with a safe ASCII fallback plus UTF-8
-  `filename*` support, so exports work with Slovak diacritics and other
-  Unicode characters in user names.
-
-## Variable Rewards
-- Rewards are based on monthly airport fees.
-- Manual overrides per user are supported.
-- Current rewards screens and rewards PDF exports are calculated from live
-  database values, not from old saved snapshots.
-- Per-user rewards PDFs show monthly breakdown and year-to-date totals up to
-  the selected month, including partial current-month values.
-- Yearly rewards summary and per-user yearly summary PDFs support month ranges
-  and also use live database values.
-- Snapshots are still stored in `variable_rewards_snapshots` when using `Save`
-  and remain available as saved audit/history data.
-- Per-user and full-list PDF exports are available.
-
-## Build And Release
-- Portable executable: `installer\build_portable.bat`
-- Customer updater: `installer\build_update.bat`
-- The updater bundles the current `dist\AirportApp.exe`, stops the target app,
-  backs up `airport_app.db`, and replaces only `AirportApp.exe`.
-- Latest release folder: `release_2026-06-04_rewards_unicode`
-
-### 2026-06-04 Release
-- Rewards reports now use live database values instead of saved snapshots.
-- Rewards PDFs show current monthly and year-to-date values for the selected
-  period.
-- PDF/CSV downloads support Slovak diacritics and other Unicode characters in
-  names.
+- new user created and waiting for approval
+- daily report created
+- monthly report created
+- daily report missing after the check time
+- monthly report missing after the check time
+- user deleted
 
 ## Roles
-- Admin: full access
-- Deputy: user approvals
-- User: sales only
+
+- `Admin`: full access
+- `Deputy`: user approvals
+- `User`: sales workflow and reports available through user menus
+
+## Reports
+
+- Daily, Monthly, and Custom reports are generated from live sales data.
+- Report creation is logged in `report_snapshots` for notifications.
+- PDF/CSV downloads support Slovak diacritics and other Unicode characters through safe ASCII fallback plus UTF-8 `filename*` support.
+
+## Variable Rewards
+
+- Rewards are based on monthly airport service fees.
+- Manual overrides per user are supported.
+- Current rewards screens and PDF exports are calculated from live database values.
+- Saved snapshots remain available as audit/history data in `variable_rewards_snapshots`.
+- Per-user and full-list PDF exports are available.
+- Yearly rewards summary supports month ranges.
+
+## Build And Release
+
+Portable executable:
+
+```powershell
+installer\build_portable.bat
+```
+
+Customer updater:
+
+```powershell
+installer\build_update.bat
+```
+
+Expected build outputs:
+
+```text
+dist/AirportApp.exe
+dist/install_update.exe
+```
+
+For customer updates, send `install_update.exe`. The updater:
+
+1. asks for the folder containing the customer's `AirportApp.exe`,
+2. stops the running target app,
+3. backs up `airport_app.db`,
+4. replaces only `AirportApp.exe`,
+5. preserves customer data.
+
+For a release package, create a folder like:
+
+```text
+release_YYYY-MM-DD_name/
+  AirportApp.exe
+  install_update.exe
+  RELEASE_NOTES.txt
+```
+
+Do not include a customer or test `airport_app.db` in release folders unless the release is explicitly a fresh demo/test package.
+
+## Moving To Another PC
+
+For an existing customer installation, copy the whole app folder, not only the `.exe`.
+
+Minimum files/folders to preserve customer data:
+
+```text
+AirportApp.exe
+airport_app.db
+airport_app.secret
+backups/
+```
+
+Recommended: copy the whole app folder from the old PC to the new PC.
 
 ## Notes
-- For production use, keep `AIRPORTAPP_DEBUG` unset.
-- Ensure backups are copied if the app folder is moved.
+
+- Keep `AIRPORTAPP_DEBUG` unset in production/customer builds.
+- Do not run the production app directly from USB; copy it to a local disk first.
+- Keep regular off-device backups of `airport_app.db` and `backups/`.

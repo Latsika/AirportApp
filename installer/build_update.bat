@@ -30,6 +30,7 @@ echo   dist\install_update.exe
 echo.
 echo Usage:
 echo   Run install_update.exe and select target folder with AirportApp.exe
+echo   The updater preserves airport_app.db and replaces only AirportApp.exe.
 echo.
 
 endlocal

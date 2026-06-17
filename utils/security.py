@@ -69,3 +69,34 @@ def verify_password_and_upgrade(password: str, stored_hash: Optional[str]) -> Tu
     if ok:
         return True, hash_password(password)
     return False, None
+
+
+def normalize_recovery_answer(answer: str) -> str:
+    """Normalize recovery answers before hashing/comparison."""
+    return " ".join((answer or "").strip().casefold().split())
+
+
+def hash_recovery_answer(answer: str) -> str:
+    return hash_password(normalize_recovery_answer(answer))
+
+
+def verify_recovery_answer_and_upgrade(answer: str, stored_value: Optional[str]) -> Tuple[bool, Optional[str]]:
+    """Verify recovery answer.
+
+    Supports new bcrypt-hashed answers and old plaintext answers. When a legacy
+    plaintext answer matches, returns an upgraded hash for storage.
+    """
+    normalized = normalize_recovery_answer(answer)
+    stored = (stored_value or "").strip()
+    if not stored:
+        return False, None
+
+    if stored.startswith(BCRYPT_PREFIXES):
+        try:
+            return bcrypt.checkpw(normalized.encode("utf-8"), stored.encode("utf-8")), None
+        except ValueError:
+            return False, None
+
+    if hmac.compare_digest(normalized, normalize_recovery_answer(stored)):
+        return True, hash_password(normalized)
+    return False, None

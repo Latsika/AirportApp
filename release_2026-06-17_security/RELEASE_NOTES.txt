@@ -1,0 +1,20 @@
+AirportApp release - 2026-06-17
+
+Security changes:
+- Replaced the fixed Flask SECRET_KEY fallback with a per-install local secret file.
+- Added 15-minute temporary rate limiting for failed login and password reset attempts.
+- Recovery question answers are now stored as bcrypt hashes.
+- Existing plaintext recovery answers are migrated to hashes on app startup.
+- Portable runtime files receive best-effort Windows ACL hardening in the frozen app.
+
+Customer update:
+1. Run install_update.exe.
+2. Select the folder that contains the customer's AirportApp.exe.
+3. The updater backs up airport_app.db and replaces only AirportApp.exe.
+4. Existing customer data is preserved.
+5. Existing airport_app.secret is preserved in the customer folder.
+
+Important:
+- Do not overwrite the customer's airport_app.db with a release/test database.
+- Do not delete airport_app.secret during a folder move.
+- This release folder intentionally contains only the executables and notes.
