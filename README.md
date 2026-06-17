@@ -57,6 +57,18 @@ Automatic DB backups are created on app startup in `backups/`. Backup retention 
 
 Transfer and recovery guide: see `TROUBLESHOOTING.md`.
 
+## Customer Data Rule
+
+`airport_app.db` is customer data. Build, release, update, troubleshooting, and support steps must not overwrite, delete, replace, or regenerate a customer's database.
+
+Required behavior:
+
+- updater may back up `airport_app.db`, but must replace only `AirportApp.exe`;
+- release folders must not include a customer/test `airport_app.db`;
+- build scripts must preserve any existing local `dist/airport_app.db`;
+- before any manual DB operation, copy or rename the current DB first;
+- never use a fresh/demo DB to "fix" an existing customer installation.
+
 ## Security Behavior
 
 - The app no longer uses a fixed Flask `SECRET_KEY` fallback.

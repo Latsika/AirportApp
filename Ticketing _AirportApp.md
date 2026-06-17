@@ -44,6 +44,13 @@ Vyznam:
 - `app_runtime.json`: docasny subor s portom bezacej appky.
 - `crash.log`: vznikne iba pri kritickej chybe startu.
 
+Zakladne prevadzkove pravidlo:
+
+- `airport_app.db` je zakaznicka databaza,
+- build, release ani update ju nesmie prepisat,
+- updater moze DB zalohovat, ale vymiena iba `AirportApp.exe`,
+- pri manualnej oprave DB sa aktualny subor najprv premenuje alebo skopiruje.
+
 ## 3. Spustenie aplikacie
 
 1. Skopiruj aplikaciu na lokalny disk.

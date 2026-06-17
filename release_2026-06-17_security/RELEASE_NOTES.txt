@@ -18,3 +18,4 @@ Important:
 - Do not overwrite the customer's airport_app.db with a release/test database.
 - Do not delete airport_app.secret during a folder move.
 - This release folder intentionally contains only the executables and notes.
+- Customer database handling rule: back up airport_app.db, never replace it during update.

@@ -10,6 +10,16 @@ Zakaznicke data su v subore:
 airport_app.db
 ```
 
+Tento subor sa nesmie prepisat, zmazat ani nahradit buildom alebo release balikom. Pri zakaznikovi je `airport_app.db` hlavny zdroj dat.
+
+Pravidlo:
+
+- updater moze databazu zalohovat,
+- updater nesmie databazu nahradit,
+- release priecinok nema obsahovat zakaznicku ani testovaciu databazu,
+- pred manualnou opravou sa aktualna DB najprv kopiruje alebo premenuje,
+- ak si nie ste isti, nerobte overwrite DB.
+
 Pri portable aplikacii musi byt databaza v tom istom priecinku ako:
 
 ```text
