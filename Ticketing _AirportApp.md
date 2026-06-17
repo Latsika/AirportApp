@@ -152,10 +152,35 @@ Security odpovede su ulozene ako bcrypt hashe, nie ako citatelny text.
 
 Kazda polozka predaja sa uklada do `sale_items`.
 
+### 6.1.1 Custom airline a custom destination
+
+Ak zakaznik chce letenku cez aerolinku alebo do destinacie, ktora nie je v master zozname, pouzi:
+
+- `Custom airline`, ak aerolinka nie je v zozname `Airline`,
+- `Custom destination`, ak destinacia nie je v zozname `Destination`.
+
+Pouzivatel vyplni:
+
+- custom airline name,
+- airline code,
+- custom destination / krajinu,
+- city,
+- airport code.
+
+Pravidla:
+
+- custom airline automaticky pouziva custom destination flow, pretoze airline a destination spolu suvisia,
+- custom airline/custom destination su dostupne iba pre predaj letenky,
+- k takemu predaju je mozne pridat existujuce `Airport Service Fees`,
+- custom airline/custom destination sa nepouzivaju pre standalone `Airline Fees`,
+- custom airline sa neuklada do master zoznamu aeroliniek,
+- custom destination sa neuklada do master zoznamu destinacii aerolinky,
+- tieto custom hodnoty ostavaju ulozene iba na danom predaji.
+
 ### 6.2 Sales List
 
 1. Otvor `Sales -> Sales List`.
-2. Filtrovanie je dostupne podla PNR, passenger name, destination, seller a textoveho hladania.
+2. Filtrovanie je dostupne podla PNR, passenger name, destination, seller a textoveho hladania. Destination filter vyhladava aj custom destination, city a airport code.
 3. `Edit` upravi predaj.
 4. `Delete` je admin akcia.
 5. Zmeny sa loguju do sales logov.
@@ -201,6 +226,8 @@ Spravanie:
 - ak su vybrane iba airline fees, report zobrazi iba airline cast,
 - ak su vybrane airline aj airport fees, report zobrazi kombinovane totaly,
 - destination sa v detailoch zobrazuje ako kod, napr. `KSC`, `BTS`.
+- custom airline/custom destination predaje su v samostatnej tabulke `Custom Destinations`,
+- tabulka `Custom Destinations` zobrazuje airline, airline code, destination/krajinu, city, airport code, ticket qty/total, Airport Service Fee qty/total, cash a card totaly.
 
 ## 9. Variable Rewards
 

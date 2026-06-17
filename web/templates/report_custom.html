@@ -208,6 +208,46 @@
   </div>
 </div>
 
+{% if custom_destination_summary %}
+<div class="card">
+  <h3>Custom Destinations ({{ date_from }} to {{ date_to }})</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Airline</th>
+        <th>Destination</th>
+        <th>City</th>
+        <th>Airport Code</th>
+        <th>Ticket Qty</th>
+        <th>Ticket Total</th>
+        <th>Airport Fee Qty</th>
+        <th>Airport Fee Total</th>
+        <th>Total</th>
+        <th>Cash</th>
+        <th>Card</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in custom_destination_summary %}
+      <tr>
+        <td>{{ r.airline_name }}{% if r.airline_code %} ({{ r.airline_code }}){% endif %}</td>
+        <td>{{ r.custom_destination_name or "-" }}</td>
+        <td>{{ r.custom_destination_city or "-" }}</td>
+        <td>{{ r.custom_destination_airport_code or "-" }}</td>
+        <td>{{ r.ticket_qty or 0 }}</td>
+        <td>{{ r.ticket_total or 0 }}</td>
+        <td>{{ r.airport_fee_qty or 0 }}</td>
+        <td>{{ r.airport_fee_total or 0 }}</td>
+        <td>{{ r.total or 0 }}</td>
+        <td>{{ r.cash_total or 0 }}</td>
+        <td>{{ r.card_total or 0 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 <div class="card">
   <h3>Airline Detail Report ({{ date_from }} to {{ date_to }})</h3>
   {% if airline_detail_rows %}

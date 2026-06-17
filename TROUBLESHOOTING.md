@@ -142,6 +142,55 @@ Po viacerych nespravnych odpovediach na security otazky:
 
 Security odpovede sa od release `2026-06-17` ukladaju ako bcrypt hashe. Starsie plaintext odpovede sa automaticky migruju na hashe pri starte aplikacie.
 
+## Problem: airline alebo destination nie je v zozname pri predaji letenky
+
+### Priznaky
+
+- Zakaznik chce letenku cez aerolinku, ktora nie je v `Airline`.
+- Zakaznik chce letenku do krajiny/mesta, ktore nie je v `Destination`.
+- Aerolinka este nema danu destinaciu v master zozname.
+- Predajca potrebuje predat letenku a zaroven evidovat statistiku pre buduce linky.
+
+### Riesenie
+
+V `Sales -> New Sale` vyber podla situacie:
+
+```text
+Custom airline
+Custom destination
+```
+
+Ak sa vyberie `Custom airline`, aplikacia automaticky pouzije aj custom destination flow, pretoze airline a destination spolu suvisia.
+
+Potom vypln:
+
+- custom airline name,
+- airline code,
+- custom destination / krajinu,
+- city,
+- airport code.
+
+Pravidla:
+
+- musi ist o predaj letenky, teda `Plane Ticket Qty` a `Plane Ticket Price` musia byt vyplnene,
+- je mozne pridat uz existujuce `Airport Service Fees`,
+- nie je mozne pouzit custom airline/custom destination pre standalone `Airline Fees`,
+- custom airline sa neprida do master zoznamu aeroliniek,
+- custom destination sa neprida do master zoznamu destinacii,
+- custom hodnoty ostavaju ulozene iba na konkretnom predaji.
+
+### Kde najst statistiku
+
+Otvor `Reports -> Custom Report`.
+
+Ak existuju predaje s custom airline alebo custom destinaciou, report zobrazi tabulku:
+
+```text
+Custom Destinations
+```
+
+Tabulka obsahuje airline, airline code, destination/krajinu, city, airport code, ticket qty/total, Airport Service Fee qty/total, cash a card totaly.
+
 ## Aktualizacia aplikacie
 
 Na aktualizaciu existujuceho zakaznika pouzite:

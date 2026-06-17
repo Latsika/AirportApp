@@ -139,6 +139,10 @@ Notification triggers include:
 ## Reports
 
 - Daily, Monthly, and Custom reports are generated from live sales data.
+- Ticket sales can use `Custom airline` and `Custom destination` when the requested route is not in the airline/destination master data. These values are saved only on that sale and are not added to master Airlines or Destinations.
+- `Custom airline` automatically uses the custom destination flow because airline and destination are linked.
+- Custom airline/destination is valid only for plane ticket sales and existing Airport Service Fees. It is not valid for standalone Airline Fees.
+- Custom Report includes a `Custom Destinations` statistics table with airline, airline code, destination/country, city, airport code, ticket totals, Airport Service Fee totals, cash, and card totals.
 - Report creation is logged in `report_snapshots` for notifications.
 - PDF/CSV downloads support Slovak diacritics and other Unicode characters through safe ASCII fallback plus UTF-8 `filename*` support.
 

@@ -72,6 +72,10 @@
   .fee-row input[type="number"] { width: 100%; }
   .fee-row .line-amount-input { width: 100%; }
   .fee-row .line-total { text-align: right; font-weight: 900; }
+  .custom-airline-fields,
+  .custom-destination-fields { display: none; grid-column: 1 / -1; margin-top: 10px; }
+  .custom-airline-fields.open,
+  .custom-destination-fields.open { display: grid; }
 
   .total {
     padding: 12px 14px;
@@ -125,23 +129,48 @@
   </div>
 
 <div class="card" style="margin-top:12px;">
-  <form method="post" action="{{ url_for('sale_edit', sale_id=sale.id) }}">
+  <form method="post" action="{{ url_for('sale_edit', sale_id=sale.id) }}" id="saleEditForm">
     <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
 
     <div class="grid2">
       <div>
         <label class="muted">Airline*</label>
         <select name="airline_id" id="airlineSelect" required>
+          <option value="__custom__" {% if sale.is_custom_airline %}selected{% endif %}>Custom airline</option>
           {% for a in airlines %}
-            <option value="{{ a.id }}" {% if a.id == sale.airline_id %}selected{% endif %}>
+            <option value="{{ a.id }}" {% if (not sale.is_custom_airline) and a.id == sale.airline_id %}selected{% endif %}>
               {{ a.name }}{% if a.code %} ({{ a.code }}){% endif %}
             </option>
           {% endfor %}
         </select>
       </div>
+      <div id="customAirlineFields" class="grid2 custom-airline-fields">
+        <div>
+          <label class="muted">Custom Airline*</label>
+          <input name="custom_airline_name" id="customAirlineName" value="{{ sale.custom_airline_name or '' }}" placeholder="e.g. Azerbaijan Airlines">
+        </div>
+        <div>
+          <label class="muted">Airline Code*</label>
+          <input name="custom_airline_code" id="customAirlineCode" value="{{ sale.custom_airline_code or '' }}" placeholder="e.g. J2" maxlength="12">
+        </div>
+      </div>
       <div>
         <label class="muted">Destination*</label>
         <select name="destination_id" id="destinationSelect" required></select>
+      </div>
+      <div id="customDestinationFields" class="grid2 custom-destination-fields">
+        <div>
+          <label class="muted">Custom Destination*</label>
+          <input name="custom_destination_name" id="customDestinationName" value="{{ sale.custom_destination_name or '' }}" placeholder="e.g. Azerbaijan">
+        </div>
+        <div>
+          <label class="muted">City*</label>
+          <input name="custom_destination_city" id="customDestinationCity" value="{{ sale.custom_destination_city or '' }}" placeholder="e.g. Baku">
+        </div>
+        <div>
+          <label class="muted">Airport Code*</label>
+          <input name="custom_destination_airport_code" id="customDestinationCode" value="{{ sale.custom_destination_airport_code or '' }}" placeholder="e.g. GYD" maxlength="8">
+        </div>
       </div>
       <div>
         <label class="muted">PNR (optional)</label>
@@ -245,14 +274,24 @@
 
 <script>
   (function () {
+    const form = document.getElementById("saleEditForm");
     const airlineFeesMap = {{ airline_fees_map|tojson }};
     const airportFees = {{ airport_fees|tojson }};
     const destinationsMap = {{ destinations_map|tojson }};
     const currentDestinationId = {{ sale.destination_id or 'null' }};
+    const currentIsCustomAirline = {{ 1 if sale.is_custom_airline else 0 }};
+    const currentIsCustomDestination = {{ 1 if sale.is_custom_destination else 0 }};
     const items = {{ items|tojson }};
 
     const airlineSelect = document.getElementById("airlineSelect");
     const destinationSelect = document.getElementById("destinationSelect");
+    const customAirlineFields = document.getElementById("customAirlineFields");
+    const customAirlineName = document.getElementById("customAirlineName");
+    const customAirlineCode = document.getElementById("customAirlineCode");
+    const customDestinationFields = document.getElementById("customDestinationFields");
+    const customDestinationName = document.getElementById("customDestinationName");
+    const customDestinationCity = document.getElementById("customDestinationCity");
+    const customDestinationCode = document.getElementById("customDestinationCode");
     const airlineFeesList = document.getElementById("airlineFeesList");
     const airportFeesList = document.getElementById("airportFeesList");
     const airlineFeeSearch = document.getElementById("airlineFeeSearch");
@@ -282,7 +321,17 @@
       });
     }
 
-    function renderDestinationOptions(airlineId, selectedId) {
+    function renderDestinationOptions(airlineId, selectedId, preferCustom) {
+      if (isCustomAirline()) {
+        destinationSelect.innerHTML = "";
+        const customOpt = document.createElement("option");
+        customOpt.value = "__custom__";
+        customOpt.textContent = "Custom destination";
+        customOpt.selected = true;
+        destinationSelect.appendChild(customOpt);
+        updateCustomDestinationState();
+        return;
+      }
       const list = destinationsMap[airlineId] || [];
       destinationSelect.innerHTML = "";
       const placeholder = document.createElement("option");
@@ -291,12 +340,21 @@
       placeholder.disabled = true;
       placeholder.selected = true;
       destinationSelect.appendChild(placeholder);
+      const customOpt = document.createElement("option");
+      customOpt.value = "__custom__";
+      customOpt.textContent = "Custom destination";
+      customOpt.selected = Boolean(preferCustom) && !selectedId;
+      destinationSelect.appendChild(customOpt);
       if (!list.length) {
         const opt = document.createElement("option");
         opt.value = "";
         opt.textContent = "No destinations for this airline";
         opt.disabled = true;
         destinationSelect.appendChild(opt);
+        if (preferCustom && !selectedId) {
+          destinationSelect.value = "__custom__";
+        }
+        updateCustomDestinationState();
         return;
       }
       list.forEach(d => {
@@ -312,6 +370,52 @@
       });
       if (!selectedId && list.length === 1) {
         destinationSelect.value = String(list[0].id);
+      }
+      if (preferCustom && !selectedId) {
+        destinationSelect.value = "__custom__";
+      }
+      updateCustomDestinationState();
+    }
+
+    function isCustomDestination() {
+      return destinationSelect.value === "__custom__";
+    }
+
+    function isCustomAirline() {
+      return airlineSelect.value === "__custom__";
+    }
+
+    function updateCustomAirlineState() {
+      const active = isCustomAirline();
+      customAirlineFields.classList.toggle("open", active);
+      [customAirlineName, customAirlineCode].forEach(input => {
+        input.required = active;
+        input.disabled = !active;
+        if (!active) input.value = "";
+      });
+      if (active) {
+        renderAirlineDatalist([]);
+        airlineFeeSearch.value = "";
+      }
+    }
+
+    function updateCustomDestinationState() {
+      const active = isCustomDestination() || isCustomAirline();
+      if (isCustomAirline() && destinationSelect.value !== "__custom__") {
+        destinationSelect.value = "__custom__";
+      }
+      customDestinationFields.classList.toggle("open", active);
+      [customDestinationName, customDestinationCity, customDestinationCode].forEach(input => {
+        input.required = active;
+        input.disabled = !active;
+        if (!active) input.value = "";
+      });
+      airlineFeeSearch.disabled = active;
+      airlineFeeAdd.disabled = active;
+      if (active) {
+        airlineFeesList.innerHTML = "";
+        airlineFeeSearch.value = "";
+        updateTotals();
       }
     }
 
@@ -413,13 +517,16 @@
     }
 
     airlineSelect.addEventListener("change", function () {
-      const aid = Number(airlineSelect.value || 0);
-      renderAirlineDatalist(airlineFeesMap[aid] || []);
-      renderDestinationOptions(aid, null);
+      updateCustomAirlineState();
+      const aid = isCustomAirline() ? 0 : Number(airlineSelect.value || 0);
+      renderAirlineDatalist(isCustomAirline() ? [] : (airlineFeesMap[aid] || []));
+      renderDestinationOptions(aid, null, false);
       airlineFeeSearch.value = "";
       airlineFeesList.innerHTML = "";
       updateTotals();
     });
+
+    destinationSelect.addEventListener("change", updateCustomDestinationState);
 
     airlineFeeAdd.addEventListener("click", function () {
       const aid = Number(airlineSelect.value || 0);
@@ -444,12 +551,29 @@
       airportFeesDatalist.appendChild(opt);
     });
 
-    const aid = Number(airlineSelect.value || 0);
-    renderAirlineDatalist(airlineFeesMap[aid] || []);
-    renderDestinationOptions(aid, currentDestinationId);
+    updateCustomAirlineState();
+    const aid = isCustomAirline() ? 0 : Number(airlineSelect.value || 0);
+    renderAirlineDatalist(isCustomAirline() ? [] : (airlineFeesMap[aid] || []));
+    renderDestinationOptions(aid, currentDestinationId, Boolean(currentIsCustomDestination || currentIsCustomAirline));
     applySelectedItems();
     ticketQtyInput.addEventListener("input", updateTotals);
     ticketAmountInput.addEventListener("input", updateTotals);
+    customAirlineCode.addEventListener("input", function () {
+      customAirlineCode.value = customAirlineCode.value.toUpperCase();
+    });
+    customDestinationCode.addEventListener("input", function () {
+      customDestinationCode.value = customDestinationCode.value.toUpperCase();
+    });
+
+    form.addEventListener("submit", function (e) {
+      if (!isCustomAirline() && !isCustomDestination()) return;
+      const ticketQty = Math.max(0, parseNum(ticketQtyInput.value));
+      const ticketAmount = parseNum(ticketAmountInput.value);
+      if (ticketQty <= 0 || ticketAmount <= 0) {
+        e.preventDefault();
+        alert("Custom airline/destination is available only for plane ticket sales.");
+      }
+    });
 
     function openModal() { paymentModal.classList.add("open"); }
     function closeModal() { paymentModal.classList.remove("open"); }

@@ -631,6 +631,136 @@ def _migrate_airport_service_fees_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _sales_create_sql(table_name: str = "sales") -> str:
+    return f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sale_group_id TEXT,
+                airline_id INTEGER,
+                is_custom_airline INTEGER NOT NULL DEFAULT 0,
+                custom_airline_name TEXT,
+                custom_airline_code TEXT,
+                destination_id INTEGER,
+                is_custom_destination INTEGER NOT NULL DEFAULT 0,
+                custom_destination_name TEXT,
+                custom_destination_city TEXT,
+                custom_destination_airport_code TEXT,
+                pnr TEXT,
+                passenger_name TEXT,
+                fee_source TEXT NOT NULL DEFAULT 'airline',
+                fee_id INTEGER NOT NULL,
+                fee_key TEXT,
+                fee_name TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL DEFAULT 'EUR',
+                quantity INTEGER NOT NULL DEFAULT 1,
+                total_amount REAL NOT NULL DEFAULT 0,
+                sold_at_utc TEXT NOT NULL,
+                created_by INTEGER,
+                payment_method TEXT NOT NULL DEFAULT 'CASH',
+                cash_amount REAL NOT NULL DEFAULT 0,
+                card_amount REAL NOT NULL DEFAULT 0,
+                airline_fee_id INTEGER,
+                airline_fee_key TEXT,
+                airline_fee_name TEXT,
+                airline_amount REAL NOT NULL DEFAULT 0,
+                airline_qty INTEGER NOT NULL DEFAULT 1,
+                airline_total REAL NOT NULL DEFAULT 0,
+                airport_fee_id INTEGER,
+                airport_fee_key TEXT,
+                airport_fee_name TEXT,
+                airport_amount REAL NOT NULL DEFAULT 0,
+                airport_qty INTEGER NOT NULL DEFAULT 1,
+                airport_total REAL NOT NULL DEFAULT 0,
+                ticket_qty INTEGER NOT NULL DEFAULT 0,
+                ticket_amount REAL NOT NULL DEFAULT 0,
+                ticket_total REAL NOT NULL DEFAULT 0,
+                grand_total REAL NOT NULL DEFAULT 0,
+                FOREIGN KEY(airline_id) REFERENCES airlines(id) ON DELETE RESTRICT,
+                FOREIGN KEY(destination_id) REFERENCES airline_destinations(id) ON DELETE RESTRICT
+            )
+            """
+
+
+def _sales_airline_notnull(conn: sqlite3.Connection) -> bool:
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(sales)")
+    for row in cur.fetchall():
+        if row["name"] == "airline_id":
+            return bool(row["notnull"])
+    return False
+
+
+def _rebuild_sales_table_nullable_airline(conn: sqlite3.Connection) -> None:
+    cols = _get_columns(conn, "sales")
+    target_cols = [
+        "id",
+        "sale_group_id",
+        "airline_id",
+        "is_custom_airline",
+        "custom_airline_name",
+        "custom_airline_code",
+        "destination_id",
+        "is_custom_destination",
+        "custom_destination_name",
+        "custom_destination_city",
+        "custom_destination_airport_code",
+        "pnr",
+        "passenger_name",
+        "fee_source",
+        "fee_id",
+        "fee_key",
+        "fee_name",
+        "amount",
+        "currency",
+        "quantity",
+        "total_amount",
+        "sold_at_utc",
+        "created_by",
+        "payment_method",
+        "cash_amount",
+        "card_amount",
+        "airline_fee_id",
+        "airline_fee_key",
+        "airline_fee_name",
+        "airline_amount",
+        "airline_qty",
+        "airline_total",
+        "airport_fee_id",
+        "airport_fee_key",
+        "airport_fee_name",
+        "airport_amount",
+        "airport_qty",
+        "airport_total",
+        "ticket_qty",
+        "ticket_amount",
+        "ticket_total",
+        "grand_total",
+    ]
+    copy_cols = [c for c in target_cols if c in cols]
+    if not copy_cols:
+        return
+
+    cur = conn.cursor()
+    conn.commit()
+    try:
+        cur.execute("PRAGMA foreign_keys = OFF")
+        cur.execute("DROP TABLE IF EXISTS sales_new")
+        cur.execute("BEGIN")
+        cur.execute(_sales_create_sql("sales_new"))
+        col_sql = ", ".join(copy_cols)
+        cur.execute(f"INSERT INTO sales_new ({col_sql}) SELECT {col_sql} FROM sales")
+        cur.execute("DROP TABLE sales")
+        cur.execute("ALTER TABLE sales_new RENAME TO sales")
+        cur.execute("COMMIT")
+    except Exception:
+        cur.execute("ROLLBACK")
+        raise
+    finally:
+        cur.execute("PRAGMA foreign_keys = ON")
+    conn.commit()
+
+
 def _migrate_sales_table(conn: sqlite3.Connection) -> None:
     cols = _get_columns(conn, "sales")
     cur = conn.cursor()
@@ -639,9 +769,23 @@ def _migrate_sales_table(conn: sqlite3.Connection) -> None:
     if "sale_group_id" not in cols:
         cur.execute("ALTER TABLE sales ADD COLUMN sale_group_id TEXT")
     if "airline_id" not in cols:
-        cur.execute("ALTER TABLE sales ADD COLUMN airline_id INTEGER NOT NULL DEFAULT 0")
+        cur.execute("ALTER TABLE sales ADD COLUMN airline_id INTEGER")
+    if "is_custom_airline" not in cols:
+        cur.execute("ALTER TABLE sales ADD COLUMN is_custom_airline INTEGER NOT NULL DEFAULT 0")
+    if "custom_airline_name" not in cols:
+        cur.execute("ALTER TABLE sales ADD COLUMN custom_airline_name TEXT")
+    if "custom_airline_code" not in cols:
+        cur.execute("ALTER TABLE sales ADD COLUMN custom_airline_code TEXT")
     if "destination_id" not in cols:
         cur.execute("ALTER TABLE sales ADD COLUMN destination_id INTEGER")
+    if "is_custom_destination" not in cols:
+        cur.execute("ALTER TABLE sales ADD COLUMN is_custom_destination INTEGER NOT NULL DEFAULT 0")
+    if "custom_destination_name" not in cols:
+        cur.execute("ALTER TABLE sales ADD COLUMN custom_destination_name TEXT")
+    if "custom_destination_city" not in cols:
+        cur.execute("ALTER TABLE sales ADD COLUMN custom_destination_city TEXT")
+    if "custom_destination_airport_code" not in cols:
+        cur.execute("ALTER TABLE sales ADD COLUMN custom_destination_airport_code TEXT")
     if "pnr" not in cols:
         cur.execute("ALTER TABLE sales ADD COLUMN pnr TEXT")
     if "passenger_name" not in cols:
@@ -706,6 +850,11 @@ def _migrate_sales_table(conn: sqlite3.Connection) -> None:
         cur.execute("ALTER TABLE sales ADD COLUMN grand_total REAL NOT NULL DEFAULT 0")
 
     conn.commit()
+
+    if _sales_airline_notnull(conn):
+        _rebuild_sales_table_nullable_airline(conn)
+        cols = _get_columns(conn, "sales")
+        cur = conn.cursor()
 
     cur.execute(
         "UPDATE sales SET sold_at_utc = ? WHERE sold_at_utc IS NULL OR sold_at_utc = ''",
@@ -1138,49 +1287,7 @@ def init_db() -> None:
         _migrate_airport_service_fees_table(conn)
 
         # SALES
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sales (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sale_group_id TEXT,
-                airline_id INTEGER NOT NULL,
-                destination_id INTEGER,
-                pnr TEXT,
-                passenger_name TEXT,
-                fee_source TEXT NOT NULL DEFAULT 'airline',
-                fee_id INTEGER NOT NULL,
-                fee_key TEXT,
-                fee_name TEXT NOT NULL,
-                amount REAL NOT NULL DEFAULT 0,
-                currency TEXT NOT NULL DEFAULT 'EUR',
-                quantity INTEGER NOT NULL DEFAULT 1,
-                total_amount REAL NOT NULL DEFAULT 0,
-                sold_at_utc TEXT NOT NULL,
-                created_by INTEGER,
-                payment_method TEXT NOT NULL DEFAULT 'CASH',
-                cash_amount REAL NOT NULL DEFAULT 0,
-                card_amount REAL NOT NULL DEFAULT 0,
-                airline_fee_id INTEGER,
-                airline_fee_key TEXT,
-                airline_fee_name TEXT,
-                airline_amount REAL NOT NULL DEFAULT 0,
-                airline_qty INTEGER NOT NULL DEFAULT 1,
-                airline_total REAL NOT NULL DEFAULT 0,
-                airport_fee_id INTEGER,
-                airport_fee_key TEXT,
-                airport_fee_name TEXT,
-                airport_amount REAL NOT NULL DEFAULT 0,
-                airport_qty INTEGER NOT NULL DEFAULT 1,
-                airport_total REAL NOT NULL DEFAULT 0,
-                ticket_qty INTEGER NOT NULL DEFAULT 0,
-                ticket_amount REAL NOT NULL DEFAULT 0,
-                ticket_total REAL NOT NULL DEFAULT 0,
-                grand_total REAL NOT NULL DEFAULT 0,
-                FOREIGN KEY(airline_id) REFERENCES airlines(id) ON DELETE RESTRICT,
-                FOREIGN KEY(destination_id) REFERENCES airline_destinations(id) ON DELETE RESTRICT
-            )
-            """
-        )
+        cur.execute(_sales_create_sql())
         conn.commit()
         _migrate_sales_table(conn)
 

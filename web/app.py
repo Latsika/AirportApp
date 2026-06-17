@@ -127,13 +127,12 @@ def _harden_local_data_permissions() -> None:
     for folder in (base_dir, os.path.join(base_dir, "backups"), os.path.join(base_dir, "logs")):
         if os.path.exists(folder):
             restrict_path_to_current_user(folder, is_dir=True)
-            for root, _dirs, files in os.walk(folder):
-                for name in files:
-                    restrict_path_to_current_user(os.path.join(root, name))
     for path in (
         get_db_path(),
         os.path.join(base_dir, "airport_app.secret"),
         os.path.join(base_dir, "app_runtime.json"),
+        os.path.join(base_dir, "crash.log"),
+        os.path.join(base_dir, "logs", "app.log"),
     ):
         if os.path.exists(path):
             restrict_path_to_current_user(path)
@@ -285,12 +284,16 @@ def _compute_monthly_airport_total(year: int, month: int) -> float:
 
 def _report_rows_by_airline(conn, date_filter: str, is_month: bool, source: str):
     cur = conn.cursor()
+    airline_name_expr, airline_code_expr = _custom_airline_sql("s")
+    destination_name_expr, destination_code_expr = _custom_destination_sql("s")
     if is_month:
         cur.execute(
-            """
-            SELECT a.id, a.name, a.code,
-                   d.dest_name AS destination_name,
-                   d.dest_code AS destination_code,
+            f"""
+            SELECT COALESCE(a.id, 0) AS id,
+                   {airline_name_expr} AS name,
+                   {airline_code_expr} AS code,
+                   {destination_name_expr} AS destination_name,
+                   {destination_code_expr} AS destination_code,
                    CASE
                        WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_key, si.fee_key)
                        WHEN si.fee_source = 'airport' THEN COALESCE(apf.fee_key, si.fee_key)
@@ -306,22 +309,24 @@ def _report_rows_by_airline(conn, date_filter: str, is_month: bool, source: str)
                    SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
             FROM sale_items si
             JOIN sales s ON s.id = si.sale_id
-            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airlines a ON a.id = s.airline_id
             LEFT JOIN airline_destinations d ON d.id = s.destination_id
             LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
             LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
             WHERE si.fee_source = ? AND substr(s.sold_at_utc, 1, 7) = ?
-            GROUP BY a.id, d.id, 6, 7
-            ORDER BY a.name COLLATE NOCASE ASC, d.dest_name COLLATE NOCASE ASC, 7 COLLATE NOCASE ASC
+            GROUP BY name, code, destination_name, destination_code, 6, 7
+            ORDER BY name COLLATE NOCASE ASC, destination_name COLLATE NOCASE ASC, 7 COLLATE NOCASE ASC
             """,
             (source, date_filter),
         )
     else:
         cur.execute(
-            """
-            SELECT a.id, a.name, a.code,
-                   d.dest_name AS destination_name,
-                   d.dest_code AS destination_code,
+            f"""
+            SELECT COALESCE(a.id, 0) AS id,
+                   {airline_name_expr} AS name,
+                   {airline_code_expr} AS code,
+                   {destination_name_expr} AS destination_name,
+                   {destination_code_expr} AS destination_code,
                    CASE
                        WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_key, si.fee_key)
                        WHEN si.fee_source = 'airport' THEN COALESCE(apf.fee_key, si.fee_key)
@@ -337,13 +342,13 @@ def _report_rows_by_airline(conn, date_filter: str, is_month: bool, source: str)
                    SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
             FROM sale_items si
             JOIN sales s ON s.id = si.sale_id
-            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airlines a ON a.id = s.airline_id
             LEFT JOIN airline_destinations d ON d.id = s.destination_id
             LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
             LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
             WHERE si.fee_source = ? AND date(s.sold_at_utc) = ?
-            GROUP BY a.id, d.id, 6, 7
-            ORDER BY a.name COLLATE NOCASE ASC, d.dest_name COLLATE NOCASE ASC, 7 COLLATE NOCASE ASC
+            GROUP BY name, code, destination_name, destination_code, 6, 7
+            ORDER BY name COLLATE NOCASE ASC, destination_name COLLATE NOCASE ASC, 7 COLLATE NOCASE ASC
             """,
             (source, date_filter),
         )
@@ -352,33 +357,40 @@ def _report_rows_by_airline(conn, date_filter: str, is_month: bool, source: str)
 
 def _report_totals_by_airline(conn, date_filter: str, is_month: bool, source: str):
     cur = conn.cursor()
+    airline_name_expr, airline_code_expr = _custom_airline_sql("s")
     if is_month:
         cur.execute(
-            """
-            SELECT a.id, a.name, a.code, SUM(si.total_amount) AS total,
+            f"""
+            SELECT COALESCE(a.id, 0) AS id,
+                   {airline_name_expr} AS name,
+                   {airline_code_expr} AS code,
+                   SUM(si.total_amount) AS total,
                    SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
                    SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
             FROM sale_items si
             JOIN sales s ON s.id = si.sale_id
-            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airlines a ON a.id = s.airline_id
             WHERE si.fee_source = ? AND substr(s.sold_at_utc, 1, 7) = ?
-            GROUP BY a.id
-            ORDER BY a.name COLLATE NOCASE ASC
+            GROUP BY name, code
+            ORDER BY name COLLATE NOCASE ASC
             """,
             (source, date_filter),
         )
     else:
         cur.execute(
-            """
-            SELECT a.id, a.name, a.code, SUM(si.total_amount) AS total,
+            f"""
+            SELECT COALESCE(a.id, 0) AS id,
+                   {airline_name_expr} AS name,
+                   {airline_code_expr} AS code,
+                   SUM(si.total_amount) AS total,
                    SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
                    SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
             FROM sale_items si
             JOIN sales s ON s.id = si.sale_id
-            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airlines a ON a.id = s.airline_id
             WHERE si.fee_source = ? AND date(s.sold_at_utc) = ?
-            GROUP BY a.id
-            ORDER BY a.name COLLATE NOCASE ASC
+            GROUP BY name, code
+            ORDER BY name COLLATE NOCASE ASC
             """,
             (source, date_filter),
         )
@@ -421,37 +433,42 @@ def _report_total_all(conn, date_filter: str, is_month: bool, source: str):
 
 def _report_ticket_totals_by_airline(conn, date_filter: str, is_month: bool):
     cur = conn.cursor()
+    airline_name_expr, airline_code_expr = _custom_airline_sql("s")
     if is_month:
         cur.execute(
-            """
-            SELECT a.id, a.name, a.code,
+            f"""
+            SELECT COALESCE(a.id, 0) AS id,
+                   {airline_name_expr} AS name,
+                   {airline_code_expr} AS code,
                    SUM(si.quantity) AS qty,
                    SUM(si.total_amount) AS total,
                    SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
                    SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
             FROM sale_items si
             JOIN sales s ON s.id = si.sale_id
-            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airlines a ON a.id = s.airline_id
             WHERE si.fee_source = 'ticket' AND substr(s.sold_at_utc, 1, 7) = ?
-            GROUP BY a.id
-            ORDER BY a.name COLLATE NOCASE ASC
+            GROUP BY name, code
+            ORDER BY name COLLATE NOCASE ASC
             """,
             (date_filter,),
         )
     else:
         cur.execute(
-            """
-            SELECT a.id, a.name, a.code,
+            f"""
+            SELECT COALESCE(a.id, 0) AS id,
+                   {airline_name_expr} AS name,
+                   {airline_code_expr} AS code,
                    SUM(si.quantity) AS qty,
                    SUM(si.total_amount) AS total,
                    SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
                    SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
             FROM sale_items si
             JOIN sales s ON s.id = si.sale_id
-            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airlines a ON a.id = s.airline_id
             WHERE si.fee_source = 'ticket' AND date(s.sold_at_utc) = ?
-            GROUP BY a.id
-            ORDER BY a.name COLLATE NOCASE ASC
+            GROUP BY name, code
+            ORDER BY name COLLATE NOCASE ASC
             """,
             (date_filter,),
         )
@@ -598,6 +615,64 @@ def _parse_custom_report_filters(args):
     }
 
 
+def _custom_destination_sql(prefix: str = "s") -> tuple[str, str]:
+    name_expr = (
+        f"CASE WHEN COALESCE({prefix}.is_custom_destination, 0) = 1 "
+        f"THEN TRIM(COALESCE({prefix}.custom_destination_city, '')) ELSE d.dest_name END"
+    )
+    code_expr = (
+        f"CASE WHEN COALESCE({prefix}.is_custom_destination, 0) = 1 "
+        f"THEN UPPER(TRIM(COALESCE({prefix}.custom_destination_airport_code, ''))) ELSE d.dest_code END"
+    )
+    return name_expr, code_expr
+
+
+def _custom_airline_sql(prefix: str = "s") -> tuple[str, str]:
+    name_expr = (
+        f"CASE WHEN COALESCE({prefix}.is_custom_airline, 0) = 1 "
+        f"THEN TRIM(COALESCE({prefix}.custom_airline_name, '')) ELSE a.name END"
+    )
+    code_expr = (
+        f"CASE WHEN COALESCE({prefix}.is_custom_airline, 0) = 1 "
+        f"THEN UPPER(TRIM(COALESCE({prefix}.custom_airline_code, ''))) ELSE a.code END"
+    )
+    return name_expr, code_expr
+
+
+def _parse_sale_airline_form() -> dict:
+    raw = (request.form.get("airline_id") or "").strip()
+    is_custom = raw == "__custom__"
+    custom_name = _sanitize(request.form.get("custom_airline_name"))
+    custom_code = _sanitize(request.form.get("custom_airline_code")).upper()
+    if len(custom_code) > 12:
+        custom_code = custom_code[:12]
+    return {
+        "raw": raw,
+        "is_custom": is_custom,
+        "airline_id": None,
+        "custom_name": custom_name,
+        "custom_code": custom_code,
+    }
+
+
+def _parse_sale_destination_form() -> dict:
+    raw = (request.form.get("destination_id") or "").strip()
+    is_custom = raw == "__custom__"
+    custom_name = _sanitize(request.form.get("custom_destination_name"))
+    custom_city = _sanitize(request.form.get("custom_destination_city"))
+    custom_code = _sanitize(request.form.get("custom_destination_airport_code")).upper()
+    if len(custom_code) > 8:
+        custom_code = custom_code[:8]
+    return {
+        "raw": raw,
+        "is_custom": is_custom,
+        "destination_id": None,
+        "custom_name": custom_name,
+        "custom_city": custom_city,
+        "custom_code": custom_code,
+    }
+
+
 def _normalize_date_range(date_from: str, date_to: str) -> tuple[str, str]:
     def _parse_date(value: str):
         value = (value or "").strip()
@@ -696,13 +771,22 @@ def _build_custom_report(filters: dict):
             "series_sum_cumulative": [],
         }
 
+    airline_name_expr, airline_code_expr = _custom_airline_sql("s")
+    destination_name_expr, destination_code_expr = _custom_destination_sql("s")
     sql = f"""
         SELECT
             s.id AS sale_id,
-            a.name AS airline_name,
-            a.code AS airline_code,
-            d.dest_name AS destination_name,
-            d.dest_code AS destination_code,
+            {airline_name_expr} AS airline_name,
+            {airline_code_expr} AS airline_code,
+            COALESCE(s.is_custom_airline, 0) AS is_custom_airline,
+            s.custom_airline_name,
+            s.custom_airline_code,
+            {destination_name_expr} AS destination_name,
+            {destination_code_expr} AS destination_code,
+            COALESCE(s.is_custom_destination, 0) AS is_custom_destination,
+            s.custom_destination_name,
+            s.custom_destination_city,
+            s.custom_destination_airport_code,
             s.sold_at_utc,
             s.payment_method,
             u.fullname AS sold_by_name,
@@ -722,13 +806,13 @@ def _build_custom_report(filters: dict):
             si.total_amount
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
-        JOIN airlines a ON a.id = s.airline_id
+        LEFT JOIN airlines a ON a.id = s.airline_id
         LEFT JOIN airline_destinations d ON d.id = s.destination_id
         LEFT JOIN users u ON u.id = s.created_by
         LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
         LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
         WHERE {" AND ".join(where)}
-        ORDER BY s.sold_at_utc DESC, a.name COLLATE NOCASE ASC, d.dest_name COLLATE NOCASE ASC,
+        ORDER BY s.sold_at_utc DESC, airline_name COLLATE NOCASE ASC, destination_name COLLATE NOCASE ASC,
                  fee_name COLLATE NOCASE ASC
     """
     with get_connection() as conn:
@@ -839,12 +923,13 @@ def _custom_report_airline_detail_rows(filters: dict):
     else:
         where.append("si.fee_source = 'airline'")
 
+    _, destination_code_expr = _custom_destination_sql("s")
     sql = f"""
         SELECT
             date(s.sold_at_utc) AS sold_date,
             s.pnr,
             s.passenger_name,
-            COALESCE(d.dest_code, '') AS destination_code,
+            COALESCE({destination_code_expr}, '') AS destination_code,
             CASE
                 WHEN si.fee_source = 'ticket' THEN COALESCE(si.fee_name, 'Plane Ticket')
                 ELSE COALESCE(af.fee_name, si.fee_name, si.fee_key)
@@ -892,10 +977,16 @@ def _custom_report_items_by_source(filters: dict, source: str):
         where.append("si.fee_source = ?")
         params.append(source)
 
+    airline_name_expr, airline_code_expr = _custom_airline_sql("s")
+    destination_name_expr, destination_code_expr = _custom_destination_sql("s")
     sql = f"""
-        SELECT a.id, a.name, a.code,
-               d.dest_name AS destination_name,
-               d.dest_code AS destination_code,
+        SELECT COALESCE(a.id, 0) AS id,
+               {airline_name_expr} AS name,
+               {airline_code_expr} AS code,
+               {destination_name_expr} AS destination_name,
+               {destination_code_expr} AS destination_code,
+               COALESCE(s.is_custom_airline, 0) AS is_custom_airline,
+               COALESCE(s.is_custom_destination, 0) AS is_custom_destination,
                CASE
                    WHEN si.fee_source = 'ticket' THEN 'TICKET'
                    WHEN si.fee_source = 'airline' THEN COALESCE(af.fee_key, si.fee_key)
@@ -913,14 +1004,14 @@ def _custom_report_items_by_source(filters: dict, source: str):
                SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
-        JOIN airlines a ON a.id = s.airline_id
+        LEFT JOIN airlines a ON a.id = s.airline_id
         LEFT JOIN airline_destinations d ON d.id = s.destination_id
         LEFT JOIN airline_fees af ON af.id = si.fee_id AND si.fee_source = 'airline'
         LEFT JOIN airport_service_fees apf ON apf.id = si.fee_id AND si.fee_source = 'airport'
         WHERE {" AND ".join(where)}
-        GROUP BY a.id, d.id, 6, 7
-        ORDER BY a.name COLLATE NOCASE ASC, d.dest_name COLLATE NOCASE ASC,
-                 7 COLLATE NOCASE ASC
+        GROUP BY name, code, destination_name, destination_code, 8, 9
+        ORDER BY name COLLATE NOCASE ASC, destination_name COLLATE NOCASE ASC,
+                 9 COLLATE NOCASE ASC
     """
     with get_connection() as conn:
         cur = conn.cursor()
@@ -941,16 +1032,20 @@ def _custom_report_totals_by_airline(filters: dict, source: str):
         where.append("si.fee_source = ?")
         params.append(source)
 
+    airline_name_expr, airline_code_expr = _custom_airline_sql("s")
     sql = f"""
-        SELECT a.id, a.name, a.code, SUM(si.total_amount) AS total,
+        SELECT COALESCE(a.id, 0) AS id,
+               {airline_name_expr} AS name,
+               {airline_code_expr} AS code,
+               SUM(si.total_amount) AS total,
                SUM(CASE WHEN s.payment_method = 'CASH' THEN si.total_amount ELSE 0 END) AS cash_total,
                SUM(CASE WHEN s.payment_method = 'CARD' THEN si.total_amount ELSE 0 END) AS card_total
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
-        JOIN airlines a ON a.id = s.airline_id
+        LEFT JOIN airlines a ON a.id = s.airline_id
         WHERE {" AND ".join(where)}
-        GROUP BY a.id
-        ORDER BY a.name COLLATE NOCASE ASC
+        GROUP BY name, code
+        ORDER BY name COLLATE NOCASE ASC
     """
     with get_connection() as conn:
         cur = conn.cursor()
@@ -988,6 +1083,65 @@ def _custom_report_total_all(filters: dict, source: str):
         "cash_total": float(row["cash_total"] or 0),
         "card_total": float(row["card_total"] or 0),
     }
+
+
+def _custom_report_custom_destinations(filters: dict):
+    params = [filters["date_from"], filters["date_to"]]
+    where = [
+        "COALESCE(s.is_custom_destination, 0) = 1",
+        "date(s.sold_at_utc) BETWEEN ? AND ?",
+    ]
+
+    if filters["airline_ids"]:
+        placeholders = ",".join(["?"] * len(filters["airline_ids"]))
+        where.append(f"s.airline_id IN ({placeholders})")
+        params.extend(filters["airline_ids"])
+    if filters.get("destination_ids"):
+        return []
+    if filters["payment_methods"]:
+        placeholders = ",".join(["?"] * len(filters["payment_methods"]))
+        where.append(f"s.payment_method IN ({placeholders})")
+        params.extend(filters["payment_methods"])
+    if filters["sold_by_ids"]:
+        placeholders = ",".join(["?"] * len(filters["sold_by_ids"]))
+        where.append(f"s.created_by IN ({placeholders})")
+        params.extend(filters["sold_by_ids"])
+
+    airline_name_expr, airline_code_expr = _custom_airline_sql("s")
+    sql = f"""
+        SELECT
+            {airline_name_expr} AS airline_name,
+            {airline_code_expr} AS airline_code,
+            COALESCE(s.is_custom_airline, 0) AS is_custom_airline,
+            COALESCE(s.custom_destination_name, '') AS custom_destination_name,
+            COALESCE(s.custom_destination_city, '') AS custom_destination_city,
+            UPPER(COALESCE(s.custom_destination_airport_code, '')) AS custom_destination_airport_code,
+            SUM(CASE WHEN si.fee_source = 'ticket' THEN si.quantity ELSE 0 END) AS ticket_qty,
+            SUM(CASE WHEN si.fee_source = 'ticket' THEN si.total_amount ELSE 0 END) AS ticket_total,
+            SUM(CASE WHEN si.fee_source = 'airport' THEN si.quantity ELSE 0 END) AS airport_fee_qty,
+            SUM(CASE WHEN si.fee_source = 'airport' THEN si.total_amount ELSE 0 END) AS airport_fee_total,
+            SUM(CASE WHEN si.fee_source IN ('ticket', 'airport') THEN si.total_amount ELSE 0 END) AS total,
+            SUM(CASE WHEN s.payment_method = 'CASH' AND si.fee_source IN ('ticket', 'airport') THEN si.total_amount ELSE 0 END) AS cash_total,
+            SUM(CASE WHEN s.payment_method = 'CARD' AND si.fee_source IN ('ticket', 'airport') THEN si.total_amount ELSE 0 END) AS card_total
+        FROM sales s
+        JOIN sale_items si ON si.sale_id = s.id
+        LEFT JOIN airlines a ON a.id = s.airline_id
+        WHERE {" AND ".join(where)}
+          AND si.fee_source IN ('ticket', 'airport')
+        GROUP BY
+            airline_name,
+            airline_code,
+            LOWER(COALESCE(s.custom_destination_name, '')),
+            LOWER(COALESCE(s.custom_destination_city, '')),
+            UPPER(COALESCE(s.custom_destination_airport_code, ''))
+        ORDER BY a.name COLLATE NOCASE ASC,
+                 custom_destination_city COLLATE NOCASE ASC,
+                 custom_destination_airport_code COLLATE NOCASE ASC
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        return cur.fetchall()
 
 
 def _custom_report_to_pdf(title: str, rows, chart_data, date_from: str, date_to: str):
@@ -2147,14 +2301,16 @@ def _send_admin_email_new_user(fullname: str, nickname: str) -> None:
 
 def _sale_snapshot(conn, sale_id: int) -> dict:
     cur = conn.cursor()
+    airline_name_expr, airline_code_expr = _custom_airline_sql("s")
+    destination_name_expr, destination_code_expr = _custom_destination_sql("s")
     cur.execute(
-        """
+        f"""
         SELECT
             s.id,
-            a.name AS airline_name,
-            a.code AS airline_code,
-            d.dest_name AS destination_name,
-            d.dest_code AS destination_code,
+            {airline_name_expr} AS airline_name,
+            {airline_code_expr} AS airline_code,
+            {destination_name_expr} AS destination_name,
+            {destination_code_expr} AS destination_code,
             s.pnr,
             s.passenger_name,
             s.sold_at_utc,
@@ -2195,7 +2351,7 @@ def _sale_snapshot(conn, sale_id: int) -> dict:
                 WHERE si.sale_id = s.id
             ) AS items_label
         FROM sales s
-        JOIN airlines a ON a.id = s.airline_id
+        LEFT JOIN airlines a ON a.id = s.airline_id
         LEFT JOIN airline_destinations d ON d.id = s.destination_id
         WHERE s.id = ?
         """,
@@ -2819,8 +2975,8 @@ def sale_new():
         )
 
     require_csrf()
-    airline_id_raw = request.form.get("airline_id") or ""
-    destination_id_raw = request.form.get("destination_id") or ""
+    airline_form = _parse_sale_airline_form()
+    destination_form = _parse_sale_destination_form()
     pnr = _sanitize(request.form.get("pnr"))
     passenger_name = _sanitize(request.form.get("passenger_name"))
     ticket_qty_raw = request.form.get("ticket_qty") or "0"
@@ -2829,33 +2985,73 @@ def sale_new():
     sale_group_id = _sanitize(request.form.get("sale_group_id")) or None
 
     try:
-        airline_id = int(airline_id_raw)
-        destination_id = int(destination_id_raw)
         ticket_qty = max(0, int(ticket_qty_raw))
     except ValueError:
         flash("Invalid input.")
         return redirect(url_for("sale_new"))
 
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT id, name, code FROM airlines WHERE id = ?", (airline_id,))
-        airline_row = cur.fetchone()
-        if not airline_row:
-            flash("Airline not found.")
+    if not airline_form["is_custom"]:
+        try:
+            airline_form["airline_id"] = int(airline_form["raw"])
+        except ValueError:
+            flash("Invalid input.")
             return redirect(url_for("sale_new"))
 
-        cur.execute(
-            """
-            SELECT id, dest_name, dest_code, active
-            FROM airline_destinations
-            WHERE id = ? AND airline_id = ?
-            """,
-            (destination_id, airline_id),
-        )
-        destination_row = cur.fetchone()
-        if not destination_row:
-            flash("Destination not found for selected airline.")
+    if not destination_form["is_custom"]:
+        try:
+            destination_form["destination_id"] = int(destination_form["raw"])
+        except ValueError:
+            flash("Invalid input.")
             return redirect(url_for("sale_new"))
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        if airline_form["is_custom"]:
+            if ticket_qty <= 0 or ticket_amount <= 0:
+                flash("Custom airline is available only for plane ticket sales.")
+                return redirect(url_for("sale_new"))
+            if not airline_form["custom_name"] or not airline_form["custom_code"]:
+                flash("Fill custom airline name and code.")
+                return redirect(url_for("sale_new"))
+            if not destination_form["is_custom"]:
+                flash("Custom airline requires custom destination.")
+                return redirect(url_for("sale_new"))
+            airline_id = None
+            airline_row = {
+                "id": None,
+                "name": airline_form["custom_name"],
+                "code": airline_form["custom_code"],
+            }
+        else:
+            airline_id = airline_form["airline_id"]
+            cur.execute("SELECT id, name, code FROM airlines WHERE id = ?", (airline_id,))
+            airline_row = cur.fetchone()
+            if not airline_row:
+                flash("Airline not found.")
+                return redirect(url_for("sale_new"))
+
+        if destination_form["is_custom"]:
+            if ticket_qty <= 0 or ticket_amount <= 0:
+                flash("Custom destination is available only for plane ticket sales.")
+                return redirect(url_for("sale_new"))
+            if not destination_form["custom_name"] or not destination_form["custom_city"] or not destination_form["custom_code"]:
+                flash("Fill custom destination, city and airport code.")
+                return redirect(url_for("sale_new"))
+            destination_id = None
+        else:
+            destination_id = destination_form["destination_id"]
+            cur.execute(
+                """
+                SELECT id, dest_name, dest_code, active
+                FROM airline_destinations
+                WHERE id = ? AND airline_id = ?
+                """,
+                (destination_id, airline_id),
+            )
+            destination_row = cur.fetchone()
+            if not destination_row:
+                flash("Destination not found for selected airline.")
+                return redirect(url_for("sale_new"))
 
         if payment_method not in {"CASH", "CARD"}:
             flash("Invalid payment method.")
@@ -2868,6 +3064,9 @@ def sale_new():
         items = []
 
         airline_fee_ids = request.form.getlist("airline_fee_id")
+        if (airline_form["is_custom"] or destination_form["is_custom"]) and airline_fee_ids:
+            flash("Custom airline/destination can be used only with plane ticket and Airport Service Fees.")
+            return redirect(url_for("sale_new"))
         for fid_raw in airline_fee_ids:
             try:
                 fid = int(fid_raw)
@@ -2980,16 +3179,28 @@ def sale_new():
         cur.execute(
             """
             INSERT INTO sales (
-                sale_group_id, airline_id, destination_id, pnr, passenger_name, sold_at_utc, created_by,
+                sale_group_id, airline_id,
+                is_custom_airline, custom_airline_name, custom_airline_code,
+                destination_id,
+                is_custom_destination, custom_destination_name, custom_destination_city,
+                custom_destination_airport_code,
+                pnr, passenger_name, sold_at_utc, created_by,
                 payment_method, cash_amount, card_amount, grand_total,
                 fee_source, fee_id, fee_name, amount, currency, quantity, total_amount
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 sale_group_id,
                 airline_id,
+                1 if airline_form["is_custom"] else 0,
+                (airline_form["custom_name"] or None) if airline_form["is_custom"] else None,
+                (airline_form["custom_code"] or None) if airline_form["is_custom"] else None,
                 destination_id,
+                1 if destination_form["is_custom"] else 0,
+                (destination_form["custom_name"] or None) if destination_form["is_custom"] else None,
+                (destination_form["custom_city"] or None) if destination_form["is_custom"] else None,
+                (destination_form["custom_code"] or None) if destination_form["is_custom"] else None,
                 pnr or None,
                 passenger_name or None,
                 now,
@@ -3103,16 +3314,18 @@ def sales_list():
         )
         sellers = cur.fetchall()
 
-        sql = """
+        airline_name_expr, airline_code_expr = _custom_airline_sql("s")
+        destination_name_expr, destination_code_expr = _custom_destination_sql("s")
+        sql = f"""
             SELECT
                 s.id,
                 s.sale_group_id,
                 s.pnr,
                 s.passenger_name,
-                a.name AS airline_name,
-                a.code AS airline_code,
-                d.dest_name AS destination_name,
-                d.dest_code AS destination_code,
+                {airline_name_expr} AS airline_name,
+                {airline_code_expr} AS airline_code,
+                {destination_name_expr} AS destination_name,
+                {destination_code_expr} AS destination_code,
                 s.sold_at_utc,
                 COALESCE((
                     SELECT SUM(si.total_amount)
@@ -3158,7 +3371,7 @@ def sales_list():
                     WHERE si.sale_id = s.id
                 ) AS items_label
             FROM sales s
-            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airlines a ON a.id = s.airline_id
             LEFT JOIN airline_destinations d ON d.id = s.destination_id
             LEFT JOIN users u ON u.id = s.created_by
         """
@@ -3183,10 +3396,20 @@ def sales_list():
                     d.dest_name LIKE ?
                     OR d.dest_code LIKE ?
                     OR COALESCE(d.dest_name, '') || ' (' || COALESCE(d.dest_code, '') || ')' LIKE ?
+                    OR s.custom_destination_name LIKE ?
+                    OR s.custom_destination_city LIKE ?
+                    OR s.custom_destination_airport_code LIKE ?
                 )
                 """
             )
-            params.extend([destination_like, destination_like, destination_like])
+            params.extend([
+                destination_like,
+                destination_like,
+                destination_like,
+                destination_like,
+                destination_like,
+                destination_like,
+            ])
         if date_from:
             where.append("date(s.sold_at_utc) >= ?")
             params.append(date_from)
@@ -3204,7 +3427,7 @@ def sales_list():
         count_sql = """
             SELECT COUNT(*)
             FROM sales s
-            JOIN airlines a ON a.id = s.airline_id
+            LEFT JOIN airlines a ON a.id = s.airline_id
             LEFT JOIN airline_destinations d ON d.id = s.destination_id
             LEFT JOIN users u ON u.id = s.created_by
         """
@@ -3301,8 +3524,8 @@ def sale_edit(sale_id: int):
         )
 
     require_csrf()
-    airline_id_raw = request.form.get("airline_id") or ""
-    destination_id_raw = request.form.get("destination_id") or ""
+    airline_form = _parse_sale_airline_form()
+    destination_form = _parse_sale_destination_form()
     pnr = _sanitize(request.form.get("pnr"))
     passenger_name = _sanitize(request.form.get("passenger_name"))
     ticket_qty_raw = request.form.get("ticket_qty") or "0"
@@ -3311,12 +3534,24 @@ def sale_edit(sale_id: int):
     payment_method = _sanitize(request.form.get("payment_method")).upper() or "CASH"
 
     try:
-        airline_id = int(airline_id_raw)
-        destination_id = int(destination_id_raw)
         ticket_qty = max(0, int(ticket_qty_raw))
     except ValueError:
         flash("Invalid input.")
         return redirect(url_for("sale_edit", sale_id=sale_id))
+
+    if not airline_form["is_custom"]:
+        try:
+            airline_form["airline_id"] = int(airline_form["raw"])
+        except ValueError:
+            flash("Invalid input.")
+            return redirect(url_for("sale_edit", sale_id=sale_id))
+
+    if not destination_form["is_custom"]:
+        try:
+            destination_form["destination_id"] = int(destination_form["raw"])
+        except ValueError:
+            flash("Invalid input.")
+            return redirect(url_for("sale_edit", sale_id=sale_id))
 
     with get_connection() as conn:
         cur = conn.cursor()
@@ -3335,24 +3570,52 @@ def sale_edit(sale_id: int):
                     flash("Invalid sale date.")
                     return redirect(url_for("sale_edit", sale_id=sale_id))
 
-        cur.execute("SELECT id, name, code FROM airlines WHERE id = ?", (airline_id,))
-        airline_row = cur.fetchone()
-        if not airline_row:
-            flash("Airline not found.")
-            return redirect(url_for("sale_edit", sale_id=sale_id))
+        if airline_form["is_custom"]:
+            if ticket_qty <= 0 or ticket_amount <= 0:
+                flash("Custom airline is available only for plane ticket sales.")
+                return redirect(url_for("sale_edit", sale_id=sale_id))
+            if not airline_form["custom_name"] or not airline_form["custom_code"]:
+                flash("Fill custom airline name and code.")
+                return redirect(url_for("sale_edit", sale_id=sale_id))
+            if not destination_form["is_custom"]:
+                flash("Custom airline requires custom destination.")
+                return redirect(url_for("sale_edit", sale_id=sale_id))
+            airline_id = None
+            airline_row = {
+                "id": None,
+                "name": airline_form["custom_name"],
+                "code": airline_form["custom_code"],
+            }
+        else:
+            airline_id = airline_form["airline_id"]
+            cur.execute("SELECT id, name, code FROM airlines WHERE id = ?", (airline_id,))
+            airline_row = cur.fetchone()
+            if not airline_row:
+                flash("Airline not found.")
+                return redirect(url_for("sale_edit", sale_id=sale_id))
 
-        cur.execute(
-            """
-            SELECT id, dest_name, dest_code, active
-            FROM airline_destinations
-            WHERE id = ? AND airline_id = ?
-            """,
-            (destination_id, airline_id),
-        )
-        destination_row = cur.fetchone()
-        if not destination_row:
-            flash("Destination not found for selected airline.")
-            return redirect(url_for("sale_edit", sale_id=sale_id))
+        if destination_form["is_custom"]:
+            if ticket_qty <= 0 or ticket_amount <= 0:
+                flash("Custom destination is available only for plane ticket sales.")
+                return redirect(url_for("sale_edit", sale_id=sale_id))
+            if not destination_form["custom_name"] or not destination_form["custom_city"] or not destination_form["custom_code"]:
+                flash("Fill custom destination, city and airport code.")
+                return redirect(url_for("sale_edit", sale_id=sale_id))
+            destination_id = None
+        else:
+            destination_id = destination_form["destination_id"]
+            cur.execute(
+                """
+                SELECT id, dest_name, dest_code, active
+                FROM airline_destinations
+                WHERE id = ? AND airline_id = ?
+                """,
+                (destination_id, airline_id),
+            )
+            destination_row = cur.fetchone()
+            if not destination_row:
+                flash("Destination not found for selected airline.")
+                return redirect(url_for("sale_edit", sale_id=sale_id))
 
         if payment_method not in {"CASH", "CARD"}:
             flash("Invalid payment method.")
@@ -3360,6 +3623,9 @@ def sale_edit(sale_id: int):
 
         items = []
         airline_fee_ids = request.form.getlist("airline_fee_id")
+        if (airline_form["is_custom"] or destination_form["is_custom"]) and airline_fee_ids:
+            flash("Custom airline/destination can be used only with plane ticket and Airport Service Fees.")
+            return redirect(url_for("sale_edit", sale_id=sale_id))
         for fid_raw in airline_fee_ids:
             try:
                 fid = int(fid_raw)
@@ -3470,7 +3736,11 @@ def sale_edit(sale_id: int):
         cur.execute(
             """
             UPDATE sales
-            SET sale_group_id = ?, airline_id = ?, destination_id = ?, pnr = ?, passenger_name = ?,
+            SET sale_group_id = ?, airline_id = ?,
+                is_custom_airline = ?, custom_airline_name = ?, custom_airline_code = ?,
+                destination_id = ?, pnr = ?, passenger_name = ?,
+                is_custom_destination = ?, custom_destination_name = ?, custom_destination_city = ?,
+                custom_destination_airport_code = ?,
                 sold_at_utc = ?, payment_method = ?,
                 cash_amount = ?, card_amount = ?, grand_total = ?,
                 fee_source = ?, fee_id = ?, fee_name = ?, amount = ?, currency = ?, quantity = ?, total_amount = ?
@@ -3479,9 +3749,16 @@ def sale_edit(sale_id: int):
             (
                 sale_group_id,
                 airline_id,
+                1 if airline_form["is_custom"] else 0,
+                (airline_form["custom_name"] or None) if airline_form["is_custom"] else None,
+                (airline_form["custom_code"] or None) if airline_form["is_custom"] else None,
                 destination_id,
                 pnr or None,
                 passenger_name or None,
+                1 if destination_form["is_custom"] else 0,
+                (destination_form["custom_name"] or None) if destination_form["is_custom"] else None,
+                (destination_form["custom_city"] or None) if destination_form["is_custom"] else None,
+                (destination_form["custom_code"] or None) if destination_form["is_custom"] else None,
                 sold_at_utc,
                 payment_method,
                 cash_amount,
@@ -3662,6 +3939,7 @@ def reports_custom():
         _custom_report_airline_detail_rows(filters) if filters["include_airline"] else []
     )
     airline_fee_totals, airline_fee_grand_total = _custom_report_fee_totals(airline_detail_rows)
+    custom_destination_summary = _custom_report_custom_destinations(filters)
 
     airlines_by_id = {str(a["id"]): a for a in airlines}
     destinations_by_id = {str(d["id"]): d for d in destinations}
@@ -3804,6 +4082,7 @@ def reports_custom():
         airline_detail_rows=airline_detail_rows,
         airline_fee_totals=airline_fee_totals,
         airline_fee_grand_total=airline_fee_grand_total,
+        custom_destination_summary=custom_destination_summary,
         chart_data=chart_data,
         chart_title=chart_title,
     )
@@ -4178,6 +4457,7 @@ def reports_custom_export():
         _custom_report_airline_detail_rows(filters) if filters["include_airline"] else []
     )
     airline_fee_totals, airline_fee_grand_total = _custom_report_fee_totals(airline_detail_rows)
+    custom_destination_summary = _custom_report_custom_destinations(filters)
     _, chart_data = _build_custom_report(filters)
 
     def _destination_label(row):
@@ -4282,6 +4562,38 @@ def reports_custom_export():
         rows.append(["Total", "Cash", "Card"])
         rows.append([combined["total"], combined["cash_total"], combined["card_total"]])
 
+    if custom_destination_summary:
+        rows.append([])
+        rows.append(["Custom Destinations"])
+        rows.append([
+            "Airline",
+            "Destination",
+            "City",
+            "Airport Code",
+            "Ticket Qty",
+            "Ticket Total",
+            "Airport Fee Qty",
+            "Airport Fee Total",
+            "Total",
+            "Cash",
+            "Card",
+        ])
+        for r in custom_destination_summary:
+            airline = f"{r['airline_name']}{' (' + r['airline_code'] + ')' if r['airline_code'] else ''}"
+            rows.append([
+                airline,
+                r["custom_destination_name"] or "",
+                r["custom_destination_city"] or "",
+                r["custom_destination_airport_code"] or "",
+                r["ticket_qty"] or 0,
+                r["ticket_total"] or 0,
+                r["airport_fee_qty"] or 0,
+                r["airport_fee_total"] or 0,
+                r["total"] or 0,
+                r["cash_total"] or 0,
+                r["card_total"] or 0,
+            ])
+
     if fmt.lower() == "csv":
         flat_rows = []
         flat_rows.append(["Section", "Date", "Destination", "PNR", "Passenger Name", "Airline Fee", "Amount", "Payment"])
@@ -4342,6 +4654,39 @@ def reports_custom_export():
                         r["card_total"],
                     ]
                 )
+
+        if custom_destination_summary:
+            flat_rows.append([])
+            flat_rows.append([
+                "Section",
+                "Airline",
+                "Destination",
+                "City",
+                "Airport Code",
+                "Ticket Qty",
+                "Ticket Total",
+                "Airport Fee Qty",
+                "Airport Fee Total",
+                "Total",
+                "Cash",
+                "Card",
+            ])
+            for r in custom_destination_summary:
+                airline = f"{r['airline_name']}{' (' + r['airline_code'] + ')' if r['airline_code'] else ''}"
+                flat_rows.append([
+                    "Custom Destinations",
+                    airline,
+                    r["custom_destination_name"] or "",
+                    r["custom_destination_city"] or "",
+                    r["custom_destination_airport_code"] or "",
+                    r["ticket_qty"] or 0,
+                    r["ticket_total"] or 0,
+                    r["airport_fee_qty"] or 0,
+                    r["airport_fee_total"] or 0,
+                    r["total"] or 0,
+                    r["cash_total"] or 0,
+                    r["card_total"] or 0,
+                ])
 
         content = _report_to_csv(flat_rows)
         resp = make_response(content)

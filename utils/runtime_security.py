@@ -17,8 +17,23 @@ def restrict_path_to_current_user(path: str, *, is_dir: bool = False) -> None:
 
     grant = f"{account}:(OI)(CI)F" if is_dir else f"{account}:F"
     args = ["icacls", path, "/inheritance:r", "/grant:r", grant, "*S-1-5-18:F", "*S-1-5-32-544:F"]
+    startupinfo = None
+    creationflags = 0
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        creationflags = subprocess.CREATE_NO_WINDOW
     try:
-        subprocess.run(args, capture_output=True, text=True, check=False, timeout=10)
+        subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+            startupinfo=startupinfo,
+            creationflags=creationflags,
+        )
     except (OSError, subprocess.SubprocessError):
         pass
 

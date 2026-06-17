@@ -7,6 +7,18 @@ Security changes:
 - Existing plaintext recovery answers are migrated to hashes on app startup.
 - Portable runtime files receive best-effort Windows ACL hardening in the frozen app.
 
+Hotfix:
+- Fixed Windows console/terminal windows opening during runtime ACL hardening.
+- Reduced ACL hardening calls so it no longer iterates every backup/log file at startup.
+
+Feature changes:
+- Added Custom destination for plane ticket sales when the destination is not in the airline destination list.
+- Added Custom airline for plane ticket sales when the airline is not in the master airline list.
+- Custom airline automatically uses the custom destination flow because airline and destination are linked.
+- Custom airline/destination stores airline name/code, destination/country, city, and airport code on the sale only.
+- Custom airline/destination can be used with plane tickets and existing Airport Service Fees, not standalone Airline Fees.
+- Custom Report now includes a Custom Destinations statistics table.
+
 Customer update:
 1. Run install_update.exe.
 2. Select the folder that contains the customer's AirportApp.exe.
