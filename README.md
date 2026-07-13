@@ -121,6 +121,22 @@ SMTP can also be provided through environment variables:
 
 DB settings override environment values where both are present.
 
+Customer localhost setup:
+
+1. Start the customer's existing `AirportApp.exe` and log in as Admin.
+2. Open `Account settings` and fill SMTP host, port, user, password, sender, and TLS.
+3. Open `Create notifications` and add at least one recipient email address.
+4. Save both screens. The settings are stored in the customer's `airport_app.db`.
+5. Use `Reports` -> `Daily Report` -> `SAVE` as a quick SMTP smoke test. This sends a report-created notification to the configured recipients.
+
+Important SMTP notes:
+
+- `localhost` is only the local browser/app address. Email still needs outbound access from the customer PC to the SMTP server.
+- `Use TLS` means STARTTLS, normally port `587`. Plain local/test SMTP should have TLS off. Implicit SSL on port `465` is not supported by the current sender code.
+- Many providers require an app password or authenticated SMTP to be enabled.
+- Some providers reject mail if `sender` is not the same account as `SMTP user` or an approved alias.
+- Automatic daily/monthly report emails are sent as PDF attachments after `00:05` local time, during app activity. If the app was closed, catch-up runs after the next start/use.
+
 Notification triggers include:
 
 - new user created and waiting for approval

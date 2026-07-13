@@ -285,13 +285,45 @@ Polia:
 
 SMTP heslo je ulozene v aplikacnej DB. Preto treba chranit `airport_app.db` a neposielat ju zbytocne mimo firmy.
 
+### 11.4 Nastavenie mailov u zakaznika cez localhost
+
+Ak aplikacia bezi u zakaznika ako lokalna portable app cez `http://127.0.0.1:<port>`, SMTP sa nastavuje stale v samotnej aplikacii. `localhost` je iba adresa pre browser; odosielanie mailov ide z PC zakaznika von na SMTP server.
+
+Postup:
+
+1. Spustit zakaznikov `AirportApp.exe`.
+2. Prihlasit sa ako Admin.
+3. Otvorit `Account settings`.
+4. Vyplnit SMTP:
+   - SMTP host,
+   - SMTP port,
+   - SMTP user,
+   - SMTP password,
+   - sender,
+   - TLS.
+5. Ulozit SMTP.
+6. Otvorit `Create notifications`.
+7. Doplnit aspon jednu prijemcovsku emailovu adresu.
+8. Ulozit notification emails.
+9. Ako rychly test otvorit `Reports` -> `Daily Report` a kliknut `SAVE`. To vytvori report-created notifikaciu a overi SMTP/prijemcov.
+
+Dolezite SMTP pravidla:
+
+- `Use TLS` znamena STARTTLS, typicky port `587`.
+- Pre plain SMTP alebo lokalny test server treba TLS vypnut.
+- Implicit SSL SMTP na porte `465` aktualny sender nepouziva.
+- Pri Gmail, Microsoft 365 alebo firemnom SMTP moze byt potrebne app password alebo povolene authenticated SMTP.
+- `sender` musi byt casto rovnaky ako SMTP user alebo povoleny alias.
+- Firemny firewall/antivirus musi povolit odchod na SMTP host/port.
+
 ## 12. Automaticke report emaily
 
 1. Scheduler bezi pri aktivite aplikacie.
-2. Daily report sa posiela po nastavenom case za predchadzajuci den.
-3. Monthly report sa posiela po nastavenom case za predchadzajuci mesiac.
+2. Daily report sa posiela po `00:05` lokalneho casu za predchadzajuci den.
+3. Monthly report sa posiela po `00:05` lokalneho casu za predchadzajuci mesiac.
 4. Ak app nebezala, catch-up mechanizmus doposle chybajuce reporty po dalsom spusteni/pouziti.
 5. Duplicity sa blokuju cez snapshot/app state kluce.
+6. Automaticke daily/monthly report emaily maju PDF prilohu.
 
 ## 13. Account Settings
 

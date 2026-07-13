@@ -297,6 +297,26 @@ Postup obnovy:
 4. Pozrite `logs/app.log`.
 5. Automaticke reporty sa posielaju pri aktivite aplikacie; ak app nebezala, catch-up prebehne po dalsom spusteni/pouziti.
 
+Postup kontroly u zakaznika:
+
+1. Spustite zakaznikov `AirportApp.exe` a prihlaste sa ako Admin.
+2. V `Account settings` overte SMTP nastavenia.
+3. V `Create notifications` overte, ze je vyplneny aspon jeden prijemca.
+4. V `Reports` -> `Daily Report` kliknite `SAVE`. Toto je rychly test SMTP notifikacie.
+5. Ak test nepride, overte SMTP provider pravidla:
+   - port `587` so zapnutym TLS znamena STARTTLS,
+   - port `465` implicit SSL aktualny sender nepouziva,
+   - pri plain SMTP alebo lokalnom test serveri musi byt TLS vypnuty,
+   - `sender` musi byt casto rovnaky ako SMTP user alebo povoleny alias,
+   - provider moze vyzadovat app password alebo povolene authenticated SMTP.
+6. Ak manualny test pride, ale automaticky report nie, skontrolujte cas a prevadzku:
+   - automatic daily/monthly reporty sa posielaju po `00:05` lokalneho casu,
+   - scheduler bezi iba ked je aplikacia spustena a pride request v browseri,
+   - ak app nebezala, catch-up sa spusti po dalsom spusteni/pouziti,
+   - daily report je za predchadzajuci den,
+   - monthly report je za predchadzajuci mesiac,
+   - duplicity blokuje `report_snapshots` a `app_state`.
+
 ## Bezpecny postup pred opravou DB
 
 Pred kazdym kopirovanim alebo prepisovanim databazy:
