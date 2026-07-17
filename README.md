@@ -17,7 +17,7 @@ The server is bound to `127.0.0.1`, so it is not exposed to other computers on t
 Latest release folder:
 
 ```text
-release_2026-06-17_security
+release_2026-07-17_release_info
 ```
 
 Release contents:
@@ -25,7 +25,15 @@ Release contents:
 ```text
 AirportApp.exe
 install_update.exe
+RELEASE_INFO.md
+app_release.json
 RELEASE_NOTES.txt
+```
+
+Release ID:
+
+```text
+20260717T054514Z-8993374
 ```
 
 This release folder intentionally does not include `airport_app.db`. Existing customer data must not be overwritten by a release or test database.
@@ -48,6 +56,8 @@ Runtime files:
 
 - `airport_app.db`: main SQLite database
 - `airport_app.secret`: per-install Flask session signing secret
+- `RELEASE_INFO.md`: installed release identifier, copied during fresh install/update
+- `app_release.json`: machine-readable release identifier, copied during fresh install/update
 - `backups/`: automatic database backups
 - `logs/app.log`: application log
 - `app_runtime.json`: current local server port while the app is running
@@ -68,6 +78,69 @@ Required behavior:
 - build scripts must preserve any existing local `dist/airport_app.db`;
 - before any manual DB operation, copy or rename the current DB first;
 - never use a fresh/demo DB to "fix" an existing customer installation.
+
+## First Install On A New PC
+
+Use this only when the customer has no existing AirportApp data on that PC.
+
+1. Create a local folder on the new PC, for example:
+
+```text
+Desktop\AirportApp
+```
+
+2. Copy these files from the latest release folder into that new folder:
+
+```text
+AirportApp.exe
+RELEASE_INFO.md
+app_release.json
+```
+
+Do not use `install_update.exe` for a clean first install. The updater is for an existing installation that already has `AirportApp.exe`.
+
+3. Start:
+
+```text
+AirportApp.exe
+```
+
+4. The app opens the browser at a local address like:
+
+```text
+http://127.0.0.1:<port>
+```
+
+5. On first run, the app creates:
+
+```text
+airport_app.db
+airport_app.secret
+backups/
+logs/
+```
+
+6. Log in with the default first-run admin:
+
+```text
+Nickname: Admin
+Password: 12345
+```
+
+7. Change the Admin password immediately when prompted.
+
+8. Verify the app folder now contains:
+
+```text
+AirportApp.exe
+airport_app.db
+airport_app.secret
+RELEASE_INFO.md
+backups/
+logs/
+```
+
+After setup, configure users, roles, fees, airlines, destinations, SMTP, and notification recipients as needed.
 
 ## Security Behavior
 
@@ -190,6 +263,8 @@ Expected build outputs:
 ```text
 dist/AirportApp.exe
 dist/install_update.exe
+dist/RELEASE_INFO.md
+dist/app_release.json
 ```
 
 For customer updates, send `install_update.exe`. The updater:
@@ -197,8 +272,9 @@ For customer updates, send `install_update.exe`. The updater:
 1. asks for the folder containing the customer's `AirportApp.exe`,
 2. stops the running target app,
 3. backs up `airport_app.db`,
-4. replaces only `AirportApp.exe`,
-5. preserves customer data.
+4. replaces `AirportApp.exe`,
+5. copies `RELEASE_INFO.md` and `app_release.json`,
+6. preserves customer data.
 
 For a release package, create a folder like:
 
@@ -206,6 +282,8 @@ For a release package, create a folder like:
 release_YYYY-MM-DD_name/
   AirportApp.exe
   install_update.exe
+  RELEASE_INFO.md
+  app_release.json
   RELEASE_NOTES.txt
 ```
 

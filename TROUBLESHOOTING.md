@@ -205,16 +205,55 @@ Spravny postup:
 2. Spustite `install_update.exe`.
 3. Vyberte priecinok, kde je zakaznikov `AirportApp.exe`.
 4. Updater zalohuje `airport_app.db`.
-5. Updater vymeni iba `AirportApp.exe`.
-6. Data ostanu zachovane.
+5. Updater vymeni `AirportApp.exe`.
+6. Updater skopiruje `RELEASE_INFO.md` a `app_release.json`.
+7. Data ostanu zachovane.
 
-Nepouzivajte cerstvy release priecinok ako nahradu celej zakaznickej instalacie, ak zakaznik uz ma data. Release priecinok `release_2026-06-17_security` zamerne neobsahuje `airport_app.db`.
+Nepouzivajte cerstvy release priecinok ako nahradu celej zakaznickej instalacie, ak zakaznik uz ma data. Release priecinok `release_2026-07-17_release_info` zamerne neobsahuje `airport_app.db`.
+
+Po aktualizacii overte, ze v zakaznickom priecinku existuje:
+
+```text
+RELEASE_INFO.md
+```
+
+Tento subor ukazuje, ktory release je na PC nainstalovany.
 
 ## Cista instalacia vs aktualizacia
 
 ### Cista instalacia
 
 Pouzite len vtedy, ked zakaznik nema existujuce data.
+
+Postup uplne prvej instalacie na uplne novom PC:
+
+1. Na novom PC vytvorte lokalny priecinok, napriklad:
+
+```text
+Desktop\AirportApp
+```
+
+2. Z najnovsieho release priecinka skopirujte do noveho priecinka:
+
+```text
+AirportApp.exe
+RELEASE_INFO.md
+app_release.json
+```
+
+3. Pri cistej instalacii nespustajte `install_update.exe`. Ten je urceny len na aktualizaciu existujucej instalacie.
+
+4. Spustite:
+
+```text
+AirportApp.exe
+```
+
+5. Aplikacia otvori browser na lokalnej adrese podobnej:
+
+```text
+http://127.0.0.1:xxxxx
+```
 
 Pri prvom starte sa vytvori:
 
@@ -232,7 +271,20 @@ Nickname: Admin
 Password: 12345
 ```
 
-Pouzivatel musi heslo zmenit.
+Pouzivatel musi heslo zmenit hned pri prvom prihlaseni.
+
+Po prvom spusteni skontrolujte, ze v priecinku aplikacie existuje:
+
+```text
+AirportApp.exe
+airport_app.db
+airport_app.secret
+RELEASE_INFO.md
+backups/
+logs/
+```
+
+Potom nastavte pouzivatelov, role, fees, airlines, destinations, SMTP a notification recipients podla potreby.
 
 ### Aktualizacia existujuceho zakaznika
 
@@ -248,6 +300,8 @@ Aktualizuje sa iba:
 
 ```text
 AirportApp.exe
+RELEASE_INFO.md
+app_release.json
 ```
 
 ## Obnova z backupu
@@ -339,8 +393,9 @@ airport_app.db -> airport_app_before_fix.db
 3. Nebol presunuty iba samotny `.exe`?
 4. Nie je databaza podozrivo mala alebo prazdna?
 5. Existuje `backups/` so starsimi zalohami?
-6. Nie je login docasne zablokovany rate limitom?
-7. Nebola zakaznicka DB prepisana release/test DB?
+6. Existuje `RELEASE_INFO.md` a ukazuje ocakavany release?
+7. Nie je login docasne zablokovany rate limitom?
+8. Nebola zakaznicka DB prepisana release/test DB?
 
 ## Co poslat developerovi pri podpore
 
@@ -348,6 +403,7 @@ Poslite:
 
 - screenshot priecinka, kde je `AirportApp.exe`,
 - velkost `airport_app.db`,
+- obsah alebo screenshot `RELEASE_INFO.md`,
 - informaciu, ci existuje `airport_app.secret`,
 - informaciu, ci existuje `backups/`,
 - najnovsi relevantny obsah z `logs/app.log` alebo `crash.log`,
