@@ -58,6 +58,7 @@ Runtime files:
 - `airport_app.secret`: per-install Flask session signing secret
 - `RELEASE_INFO.md`: installed release identifier, copied during fresh install/update
 - `app_release.json`: machine-readable release identifier, copied during fresh install/update
+- `backup_settings.json`: external backup configuration, created after Admin saves a backup folder
 - `backups/`: automatic database backups
 - `logs/app.log`: application log
 - `app_runtime.json`: current local server port while the app is running
@@ -66,6 +67,50 @@ Runtime files:
 Automatic DB backups are created on app startup in `backups/`. Backup retention keeps up to 30 automatic DB backups.
 
 Transfer and recovery guide: see `TROUBLESHOOTING.md`.
+
+## External Backups
+
+Admin can configure a permanent external backup folder in:
+
+```text
+Account settings -> External backups
+```
+
+Use `Choose folder` to select the target folder through the Windows folder picker. The folder must be outside the AirportApp application folder. The setting is stored next to `AirportApp.exe` in:
+
+```text
+backup_settings.json
+```
+
+When automatic backups are enabled, the app creates ZIP backups in the selected external folder:
+
+```text
+daily/
+weekly/
+monthly/
+manual/
+```
+
+Each ZIP contains all `.db` files from the runtime app folder, plus release metadata and `backup_manifest.json`.
+
+Retention:
+
+```text
+daily:   10 backups
+weekly:  10 backups
+monthly: 10 backups
+manual:  100 backups
+```
+
+Admin can also click `Create backup now` to create a manual ZIP backup immediately.
+
+To restore data, Admin can click `Restore from backup`, choose an AirportApp backup ZIP, and let the app restore the database files. Before replacing current databases, the app saves the current `.db` files into:
+
+```text
+backups/pre_restore_YYYY-MM-DD_HHMMSS/
+```
+
+After restore, restart `AirportApp.exe` before continuing work.
 
 ## Customer Data Rule
 

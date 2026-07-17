@@ -1,0 +1,26 @@
+AirportApp release - 2026-07-17 external backups folder picker
+
+Release ID:
+20260717T102753Z-3683723
+
+Included files:
+- AirportApp.exe
+- install_update.exe
+- RELEASE_INFO.md
+- app_release.json
+
+What changed:
+- Added Choose folder button in Admin -> Account settings -> External backups.
+- Choose folder opens a Windows folder picker popup, so Admin does not need to type a path manually.
+- Backup folder field is now read-only and shows the selected path.
+- External backup ZIP behavior remains the same: all runtime .db files, release metadata, and backup_manifest.json.
+
+Customer update instructions:
+1. Back up the customer's current AirportApp folder before updating.
+2. Run install_update.exe.
+3. Select the folder that contains AirportApp.exe.
+4. Start AirportApp.exe.
+5. Log in as Admin and open Account settings -> External backups.
+6. Click Choose folder and select a backup folder outside the AirportApp folder.
+
+The updater preserves airport_app.db and replaces AirportApp.exe plus release metadata.

@@ -1,0 +1,9 @@
+{
+  "app": "AirportApp",
+  "release_id": "20260717T102037Z-3683723",
+  "built_at_utc": "2026-07-17T10:20:37+00:00",
+  "git_commit": "368372334ee5602f1e7c7f1007320aaf57587257",
+  "git_commit_short": "3683723",
+  "working_tree": "dirty",
+  "source_changes": "M README.md\n M TROUBLESHOOTING.md\n M web/app.py\n M web/templates/account_settings.html\n?? utils/backup_manager.py"
+}

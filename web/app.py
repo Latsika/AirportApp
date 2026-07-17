@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import time
 import json
@@ -51,6 +52,15 @@ from database.db import (  # noqa: E402
     set_app_state,
 )
 from utils.runtime_security import ensure_private_text_file, restrict_path_to_current_user  # noqa: E402
+from utils.backup_manager import (  # noqa: E402
+    backup_status,
+    configure_backup_folder,
+    create_backup,
+    load_backup_settings,
+    restore_backup_zip,
+    run_scheduled_backup_if_due,
+    save_backup_settings,
+)
 from utils.security import (  # noqa: E402
     hash_password,
     hash_recovery_answer,
@@ -1510,9 +1520,13 @@ def approver_required(f):
 
 
 def require_csrf() -> None:
-    token = request.form.get("csrf_token")
-    if not token or token != session.get("csrf_token"):
+    if not _csrf_is_valid():
         abort(400)
+
+
+def _csrf_is_valid() -> bool:
+    token = request.form.get("csrf_token")
+    return bool(token and token == session.get("csrf_token"))
 
 
 def _sanitize(value: str) -> str:
@@ -2016,6 +2030,13 @@ def _run_auto_report_email_scheduler() -> None:
             set_app_state("auto_monthly_report_last_sent", m_key)
 
 
+def _run_external_backup_scheduler() -> None:
+    try:
+        run_scheduled_backup_if_due()
+    except Exception:
+        pass
+
+
 def _compute_variable_rewards_distribution(year: int, month: int):
     monthly_total = _compute_monthly_airport_total(year, month)
     percent_key = f"variable_rewards_percent_{year}_{month:02d}"
@@ -2442,6 +2463,7 @@ def enforce_session_timeout_and_single_user():
         _run_auto_report_email_scheduler()
     except Exception:
         pass
+    _run_external_backup_scheduler()
 
     if session.get("logged_in") and session.get("role") == "Admin":
         if not session.get("popup_notifications"):
@@ -2536,9 +2558,17 @@ def index():
     return render_template("index.html")
 
 
+@app.get("/login", endpoint="login_get")
+def login_get():
+    return redirect(url_for("index"))
+
+
 @app.post("/login", endpoint="login")
 def login():
-    require_csrf()
+    if not _csrf_is_valid():
+        session["csrf_token"] = token_urlsafe(32)
+        flash("Login session refreshed. Please try again.")
+        return redirect(url_for("index"))
 
     if session.get("logged_in"):
         log_auth_event(
@@ -4770,7 +4800,11 @@ def account_settings():
         "sender": get_app_state("smtp_sender") or "",
         "tls": get_app_state("smtp_tls") or "1",
     }
-    return render_template("account_settings.html", smtp=smtp)
+    return render_template(
+        "account_settings.html",
+        smtp=smtp,
+        backup=backup_status(),
+    )
 
 
 @app.post("/account_settings/smtp", endpoint="account_settings_smtp")
@@ -4804,6 +4838,145 @@ def account_settings_db_export():
         flash("Database file not found.")
         return redirect(url_for("account_settings"))
     return send_file(db_path, as_attachment=True, download_name="airport_app.db")
+
+
+@app.post("/account_settings/backup_folder", endpoint="account_settings_backup_folder")
+@admin_required
+def account_settings_backup_folder():
+    require_csrf()
+    folder = _sanitize(request.form.get("backup_dir"))
+    enabled = request.form.get("backup_enabled") == "on"
+
+    if not enabled and not folder:
+        settings = load_backup_settings()
+        settings["enabled"] = False
+        save_backup_settings(settings)
+        flash("External backup disabled.")
+        return redirect(url_for("account_settings"))
+
+    try:
+        configure_backup_folder(folder, enabled=enabled)
+    except Exception as exc:
+        flash(f"Backup folder was not saved: {type(exc).__name__}: {exc}")
+        return redirect(url_for("account_settings"))
+
+    flash("Backup folder settings saved.")
+    return redirect(url_for("account_settings"))
+
+
+def _choose_folder_with_windows_dialog() -> str:
+    if os.name != "nt":
+        raise RuntimeError("Folder picker is only available on Windows.")
+    script = r"""
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = "Select AirportApp external backup folder"
+$dialog.ShowNewFolderButton = $true
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.Write($dialog.SelectedPath)
+}
+"""
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-STA", "-Command", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "Folder picker failed.").strip())
+    return (result.stdout or "").strip()
+
+
+def _choose_backup_zip_with_windows_dialog() -> str:
+    if os.name != "nt":
+        raise RuntimeError("Backup picker is only available on Windows.")
+    script = r"""
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = "Select AirportApp backup ZIP"
+$dialog.Filter = "AirportApp backup (*.zip)|*.zip|All files (*.*)|*.*"
+$dialog.Multiselect = $false
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.Write($dialog.FileName)
+}
+"""
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-STA", "-Command", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "Backup picker failed.").strip())
+    return (result.stdout or "").strip()
+
+
+@app.post("/account_settings/backup_folder/choose", endpoint="account_settings_backup_folder_choose")
+@admin_required
+def account_settings_backup_folder_choose():
+    require_csrf()
+    try:
+        selected = _choose_folder_with_windows_dialog()
+    except Exception as exc:
+        flash(f"Folder picker failed: {type(exc).__name__}: {exc}")
+        return redirect(url_for("account_settings"))
+
+    if not selected:
+        flash("Backup folder selection cancelled.")
+        return redirect(url_for("account_settings"))
+
+    try:
+        configure_backup_folder(selected, enabled=True)
+    except Exception as exc:
+        flash(f"Backup folder was not saved: {type(exc).__name__}: {exc}")
+        return redirect(url_for("account_settings"))
+
+    flash("Backup folder selected and automatic backups enabled.")
+    return redirect(url_for("account_settings"))
+
+
+@app.post("/account_settings/backup_restore/choose", endpoint="account_settings_backup_restore_choose")
+@admin_required
+def account_settings_backup_restore_choose():
+    require_csrf()
+    try:
+        selected = _choose_backup_zip_with_windows_dialog()
+    except Exception as exc:
+        flash(f"Backup picker failed: {type(exc).__name__}: {exc}")
+        return redirect(url_for("account_settings"))
+
+    if not selected:
+        flash("Restore cancelled.")
+        return redirect(url_for("account_settings"))
+
+    try:
+        result = restore_backup_zip(selected)
+    except Exception as exc:
+        flash(f"Restore failed: {type(exc).__name__}: {exc}")
+        return redirect(url_for("account_settings"))
+
+    restored_count = len(result.get("restored") or [])
+    flash(
+        "Restore complete. "
+        f"Restored {restored_count} database file(s). "
+        f"Previous database backup: {result.get('pre_restore_backup_dir')}. "
+        "Restart AirportApp before continuing work."
+    )
+    return redirect(url_for("account_settings"))
+
+
+@app.post("/account_settings/backup_now", endpoint="account_settings_backup_now")
+@admin_required
+def account_settings_backup_now():
+    require_csrf()
+    try:
+        result = create_backup(category="manual", reason="manual_admin")
+    except Exception as exc:
+        flash(f"Manual backup failed: {type(exc).__name__}: {exc}")
+        return redirect(url_for("account_settings"))
+
+    flash(f"Manual backup created: {result.get('backup_path')}")
+    return redirect(url_for("account_settings"))
 
 
 @app.route("/notifications", methods=["GET", "POST"], endpoint="notifications")

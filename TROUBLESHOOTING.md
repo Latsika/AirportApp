@@ -312,11 +312,37 @@ Zalohy su v priecinku:
 backups/
 ```
 
+Ak je nastavene externe zalohovanie, dalsie zalohy su v priecinku, ktory Admin nastavil v:
+
+```text
+Account settings -> External backups
+```
+
+Priecinok sa vybera cez tlacidlo `Choose folder`, ktore otvori Windows vyber priecinka. Cestu netreba pisat manualne.
+
+Tato cesta je ulozena v subore:
+
+```text
+backup_settings.json
+```
+
+Externy backup priecinok ma podpriecinky:
+
+```text
+daily/
+weekly/
+monthly/
+manual/
+```
+
+Externe zalohy su ZIP subory. Vo vnutri je `backup_manifest.json`, release metadata a databazy z runtime priecinka aplikacie.
+
 Backup subory maju nazvy podobne:
 
 ```text
 airport_app_2026-06-04_093711.db
 airport_app_update_2026-06-17_104500.db
+AirportApp_backup_daily_2026-07-17_121130.zip
 ```
 
 Postup obnovy:
@@ -326,6 +352,26 @@ Postup obnovy:
 3. Vybrany backup skopirujte do priecinka aplikacie.
 4. Premenujte backup na `airport_app.db`.
 5. Spustite aplikaciu.
+
+Pri ZIP externeho backupu najprv rozbalte ZIP bokom. Hlavna databaza je vo vnutri pod:
+
+```text
+databases/airport_app.db
+```
+
+Admin moze obnovu urobit aj priamo v aplikacii:
+
+```text
+Account settings -> External backups -> Restore from backup
+```
+
+Tlacidlo otvori Windows vyber ZIP suboru. Pred obnovou aplikacia automaticky ulozi aktualne `.db` subory do:
+
+```text
+backups/pre_restore_YYYY-MM-DD_HHMMSS/
+```
+
+Po uspesnej obnove zatvorte a znova spustite `AirportApp.exe`.
 
 ## Problem: aplikacia sa nespusti
 

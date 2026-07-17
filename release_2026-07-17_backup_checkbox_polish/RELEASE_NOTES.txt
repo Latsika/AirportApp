@@ -1,0 +1,24 @@
+AirportApp release - 2026-07-17 backup checkbox polish
+
+Release ID:
+20260717T105354Z-3683723
+
+Included files:
+- AirportApp.exe
+- install_update.exe
+- RELEASE_INFO.md
+- app_release.json
+
+What changed:
+- Moved Automatic backups checkbox closer to the External backups heading.
+- Increased the checkbox size by 10%.
+- Kept previous backup UI polish, folder picker, external backup, and restore workflow.
+
+Customer update instructions:
+1. Back up the customer's current AirportApp folder before updating.
+2. Run install_update.exe.
+3. Select the folder that contains AirportApp.exe.
+4. Start AirportApp.exe.
+5. Log in as Admin and open Account settings -> External backups.
+
+The updater preserves airport_app.db and replaces AirportApp.exe plus release metadata.

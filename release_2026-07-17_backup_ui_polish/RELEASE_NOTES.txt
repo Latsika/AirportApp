@@ -1,0 +1,26 @@
+AirportApp release - 2026-07-17 backup UI polish
+
+Release ID:
+20260717T104834Z-3683723
+
+Included files:
+- AirportApp.exe
+- install_update.exe
+- RELEASE_INFO.md
+- app_release.json
+
+What changed:
+- Polished Admin -> Account settings -> External backups layout.
+- Save backup settings is aligned below Choose folder.
+- Choose folder and Save backup settings are larger and equal width.
+- Create backup now, Restore from backup, and Export database use matching size and font.
+- Restore from backup uses the same button styling as other backup/database actions.
+
+Customer update instructions:
+1. Back up the customer's current AirportApp folder before updating.
+2. Run install_update.exe.
+3. Select the folder that contains AirportApp.exe.
+4. Start AirportApp.exe.
+5. Log in as Admin and open Account settings -> External backups.
+
+The updater preserves airport_app.db and replaces AirportApp.exe plus release metadata.

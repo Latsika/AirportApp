@@ -1,0 +1,27 @@
+AirportApp release - 2026-07-17 backup retention 10
+
+Release ID:
+20260717T111558Z-3683723
+
+Included files:
+- AirportApp.exe
+- install_update.exe
+- RELEASE_INFO.md
+- app_release.json
+
+What changed:
+- External backup retention for daily backups is 10 ZIP files.
+- External backup retention for weekly backups is 10 ZIP files.
+- External backup retention for monthly backups is 10 ZIP files.
+- When an 11th backup is created in a category, the oldest ZIP in that category is removed.
+- Manual backups remain on a separate retention limit of 100 ZIP files.
+- Includes previous backup/restore workflow and UI polish.
+
+Customer update instructions:
+1. Back up the customer's current AirportApp folder before updating.
+2. Run install_update.exe.
+3. Select the folder that contains AirportApp.exe.
+4. Start AirportApp.exe.
+5. Log in as Admin and verify Account settings -> External backups.
+
+The updater preserves airport_app.db and replaces AirportApp.exe plus release metadata.

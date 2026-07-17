@@ -6,8 +6,71 @@
   body { padding: 0; }
   .app-shell { max-width: none; }
   .container { width: 100vw; max-width: 100vw; border-radius: 0; }
+  .settings-section { max-width: 900px; margin-top: 16px; }
+  .backup-folder-grid {
+    display: grid;
+    grid-template-columns: minmax(240px, 1fr) 210px;
+    gap: 12px;
+    align-items: end;
+  }
+  .backup-actions-col {
+    display: grid;
+    gap: 10px;
+  }
+  .backup-control-btn {
+    width: 100%;
+    min-height: 31px;
+    margin: 0;
+    padding: 7px 15px;
+    font-size: 15.4px;
+    font-weight: 900;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+  .backup-toggle-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 8px;
+    min-height: 31px;
+  }
+  .backup-toggle-row input[type="checkbox"] {
+    transform: scale(1.1);
+    transform-origin: left center;
+  }
+  .settings-action-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+  .settings-action-btn {
+    width: 210px;
+    min-height: 31px;
+    margin: 0;
+    padding: 7px 15px;
+    font-size: 15.4px;
+    font-weight: 900;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+  .backup-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px 16px;
+    margin-top: 14px;
+    max-width: 900px;
+  }
+  .backup-status-value {
+    font-size: 14px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
   @media (max-width: 700px) {
     .container { padding: 20px; }
+    .backup-folder-grid { grid-template-columns: 1fr; }
+    .backup-actions-col { width: 210px; max-width: 100%; }
   }
 </style>
 {% endblock %}
@@ -22,7 +85,7 @@
   <p style="opacity:.85;">Manage notification emails for the system.</p>
 </div>
 
-<div style="max-width:900px; margin-top:16px;">
+<div class="settings-section">
   <h3 style="margin:0 0 8px;">SMTP settings</h3>
   <form method="post" action="{{ url_for('account_settings_smtp') }}">
     <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
@@ -60,11 +123,92 @@
   </form>
 </div>
 
-<div style="max-width:900px; margin-top:16px;">
+<div class="settings-section">
+  <h3 style="margin:0 0 8px;">External backups</h3>
+  <form method="post" action="{{ url_for('account_settings_backup_folder') }}">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <div class="backup-toggle-row">
+      <input type="checkbox" name="backup_enabled" {% if backup and backup.settings.enabled %}checked{% endif %}>
+      <span class="muted">Automatic backups</span>
+    </div>
+
+    <div class="backup-folder-grid">
+      <div>
+        <label class="muted" style="margin:0 0 6px; display:block;">Backup folder</label>
+        <input
+          type="text"
+          name="backup_dir"
+          value="{{ backup.settings.backup_dir if backup else '' }}"
+          placeholder="D:\AirportApp_Backups"
+          readonly
+          style="margin:0;">
+      </div>
+      <div class="backup-actions-col">
+        <button
+          type="submit"
+          form="backup-folder-picker-form"
+          class="backup-control-btn">Choose folder</button>
+        <button type="submit" class="backup-control-btn">Save backup settings</button>
+      </div>
+    </div>
+  </form>
+
+  <form id="backup-folder-picker-form" method="post" action="{{ url_for('account_settings_backup_folder_choose') }}">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+  </form>
+
+  <div class="settings-action-row">
+    <form method="post" action="{{ url_for('account_settings_backup_now') }}">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <button type="submit" class="settings-action-btn">Create backup now</button>
+    </form>
+
+    <form method="post" action="{{ url_for('account_settings_backup_restore_choose') }}">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <button type="submit" class="settings-action-btn">Restore from backup</button>
+    </form>
+  </div>
+
+  <div class="backup-status-grid">
+    <div>
+      <div class="muted">Settings file</div>
+      <div class="backup-status-value">{{ backup.settings_path if backup else '-' }}</div>
+    </div>
+    <div>
+      <div class="muted">App folder</div>
+      <div class="backup-status-value">{{ backup.app_folder if backup else '-' }}</div>
+    </div>
+    <div>
+      <div class="muted">Last backup</div>
+      <div class="backup-status-value">{{ backup.settings.last_backup_path if backup and backup.settings.last_backup_path else '-' }}</div>
+    </div>
+    <div>
+      <div class="muted">Last success</div>
+      <div class="backup-status-value">{{ backup.settings.last_success_at if backup and backup.settings.last_success_at else '-' }}</div>
+    </div>
+    <div>
+      <div class="muted">Stored backups</div>
+      <div class="backup-status-value">
+        daily {{ backup.counts.get('daily', 0) if backup else 0 }},
+        weekly {{ backup.counts.get('weekly', 0) if backup else 0 }},
+        monthly {{ backup.counts.get('monthly', 0) if backup else 0 }},
+        manual {{ backup.counts.get('manual', 0) if backup else 0 }}
+      </div>
+    </div>
+    <div>
+      <div class="muted">Last error</div>
+      <div class="backup-status-value">{{ backup.settings.last_error if backup and backup.settings.last_error else '-' }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="settings-section">
   <h3 style="margin:0 0 8px;">Database</h3>
   <div class="muted" style="margin-bottom:8px;">Export a backup copy of the main database.</div>
-  <form method="get" action="{{ url_for('account_settings_db_export') }}">
-    <button type="submit" style="width:auto; margin:0;">Export database</button>
-  </form>
+  <div class="settings-action-row">
+    <form method="get" action="{{ url_for('account_settings_db_export') }}">
+      <button type="submit" class="settings-action-btn">Export database</button>
+    </form>
+  </div>
 </div>
 {% endblock %}

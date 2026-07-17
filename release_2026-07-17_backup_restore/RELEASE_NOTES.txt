@@ -1,0 +1,28 @@
+AirportApp release - 2026-07-17 backup restore workflow
+
+Release ID:
+20260717T103840Z-3683723
+
+Included files:
+- AirportApp.exe
+- install_update.exe
+- RELEASE_INFO.md
+- app_release.json
+
+What changed:
+- Added Restore from backup in Admin -> Account settings -> External backups.
+- Restore opens a Windows ZIP picker popup.
+- App validates the selected backup ZIP and SQLite database integrity.
+- Before restore, current .db files are backed up to backups/pre_restore_YYYY-MM-DD_HHMMSS/.
+- Restore replaces runtime .db files from the ZIP backup.
+- Admin is told to restart AirportApp after restore.
+
+Customer update instructions:
+1. Back up the customer's current AirportApp folder before updating.
+2. Run install_update.exe.
+3. Select the folder that contains AirportApp.exe.
+4. Start AirportApp.exe.
+5. Log in as Admin and open Account settings -> External backups.
+6. Use Restore from backup to choose an AirportApp backup ZIP when data recovery is needed.
+
+The updater preserves airport_app.db and replaces AirportApp.exe plus release metadata.
