@@ -1,0 +1,23 @@
+AirportApp release - 2026-07-17
+
+Release ID:
+20260717T054514Z-8993374
+
+Included files:
+- AirportApp.exe
+- install_update.exe
+- RELEASE_INFO.md
+- app_release.json
+
+What changed:
+- Added customer-visible release tracking via RELEASE_INFO.md.
+- Update installer now copies release metadata next to AirportApp.exe.
+- Update build now rebuilds the current AirportApp.exe before creating install_update.exe.
+
+Customer update instructions:
+1. Back up the customer's current AirportApp folder before updating.
+2. Run install_update.exe.
+3. Select the folder that contains AirportApp.exe.
+4. After the update, verify RELEASE_INFO.md exists in that same folder.
+
+The updater preserves airport_app.db and replaces AirportApp.exe plus release metadata.

@@ -12,6 +12,8 @@ from tkinter import filedialog, messagebox
 
 APP_EXE_NAME = "AirportApp.exe"
 DB_FILE_NAME = "airport_app.db"
+RELEASE_INFO_NAME = "RELEASE_INFO.md"
+RELEASE_JSON_NAME = "app_release.json"
 PAYLOAD_RELATIVE_PATH = os.path.join("payload", APP_EXE_NAME)
 
 
@@ -23,6 +25,10 @@ def _payload_base() -> Path:
 
 def _payload_exe_path() -> Path:
     return _payload_base() / PAYLOAD_RELATIVE_PATH
+
+
+def _payload_file_path(file_name: str) -> Path:
+    return _payload_base() / "payload" / file_name
 
 
 def _choose_target_dir() -> Path | None:
@@ -72,6 +78,13 @@ def _update_exe(target_dir: Path, source_exe: Path) -> None:
     os.replace(tmp_exe, target_exe)
 
 
+def _copy_release_metadata(target_dir: Path) -> None:
+    for file_name in (RELEASE_INFO_NAME, RELEASE_JSON_NAME):
+        source = _payload_file_path(file_name)
+        if source.exists():
+            shutil.copy2(source, target_dir / file_name)
+
+
 def _run() -> int:
     source_exe = _payload_exe_path()
     if not source_exe.exists():
@@ -104,6 +117,7 @@ def _run() -> int:
         _stop_running_target_exe(target_exe)
         backup_path = _backup_db(target_dir)
         _update_exe(target_dir, source_exe)
+        _copy_release_metadata(target_dir)
     except PermissionError:
         messagebox.showerror(
             "Update failed",
@@ -123,7 +137,8 @@ def _run() -> int:
         "Update complete",
         "AirportApp was updated successfully.\n\n"
         f"{backup_info}"
-        "User data and sales data were preserved.",
+        "User data and sales data were preserved.\n"
+        "Release info was written to RELEASE_INFO.md.",
     )
     return 0
 

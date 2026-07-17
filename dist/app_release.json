@@ -1,0 +1,9 @@
+{
+  "app": "AirportApp",
+  "release_id": "20260717T054514Z-8993374",
+  "built_at_utc": "2026-07-17T05:45:14+00:00",
+  "git_commit": "89933748c0e5812f5c16602875ea80be5858c601",
+  "git_commit_short": "8993374",
+  "working_tree": "dirty",
+  "source_changes": " M installer/build_portable.bat\n M installer/build_update.bat\n M installer/install_update.py\n M installer/install_update.spec\n?? installer/write_release_info.py"
+}

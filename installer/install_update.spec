@@ -7,6 +7,8 @@ a = Analysis(
     binaries=[],
     datas=[
         ("..\\dist\\AirportApp.exe", "payload"),
+        ("..\\dist\\RELEASE_INFO.md", "payload"),
+        ("..\\dist\\app_release.json", "payload"),
     ],
     hiddenimports=[],
     hookspath=[],

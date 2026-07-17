@@ -64,9 +64,14 @@ if exist "%PRESERVED_SECRET%" (
   copy /y "%PRESERVED_SECRET%" "dist\airport_app.secret" >nul
 )
 
+echo Writing release metadata...
+"%PY%" "installer\write_release_info.py"
+if errorlevel 1 exit /b 1
+
 echo.
 echo Build complete:
 echo   dist\AirportApp.exe
+echo   dist\RELEASE_INFO.md
 echo.
 echo For a fresh install, copy AirportApp.exe to the target folder and start it.
 echo For an existing customer, use install_update.exe or copy the whole app folder with airport_app.db.
