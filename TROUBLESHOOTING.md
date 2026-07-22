@@ -209,7 +209,7 @@ Spravny postup:
 6. Updater skopiruje `RELEASE_INFO.md` a `app_release.json`.
 7. Data ostanu zachovane.
 
-Nepouzivajte cerstvy release priecinok ako nahradu celej zakaznickej instalacie, ak zakaznik uz ma data. Release priecinok `release_2026-07-17_release_info` zamerne neobsahuje `airport_app.db`.
+Nepouzivajte cerstvy release priecinok ako nahradu celej zakaznickej instalacie, ak zakaznik uz ma data. Aktualny release priecinok `release_CURRENT_2026-07-22_variable_rewards_view` zamerne neobsahuje `airport_app.db`.
 
 Po aktualizacii overte, ze v zakaznickom priecinku existuje:
 
@@ -218,6 +218,14 @@ RELEASE_INFO.md
 ```
 
 Tento subor ukazuje, ktory release je na PC nainstalovany.
+
+Pre existujuceho zakaznika posielajte hlavne:
+
+```text
+install_update.exe
+```
+
+`AirportApp.exe` z release priecinka je urceny na cistu instalaciu alebo manualny portable copy postup, nie na prepis celeho existujuceho zakaznickeho priecinka.
 
 ## Cista instalacia vs aktualizacia
 
@@ -372,6 +380,39 @@ backups/pre_restore_YYYY-MM-DD_HHMMSS/
 ```
 
 Po uspesnej obnove zatvorte a znova spustite `AirportApp.exe`.
+
+## Variable Rewards
+
+### Problem: vypnutie Active zmeni historicke odmeny
+
+Aktualne spravanie:
+
+- checkbox vo Variable Rewards je `Reward active this month`,
+- stav sa uklada samostatne pre vybrany mesiac a rok,
+- vypnutie usera napr. v juni ovplyvni iba jun,
+- predchadzajuce mesiace ostavaju zachovane.
+
+Ak sa v historickom mesiaci zobrazuje necakany stav, skontrolujte, ci je v hornej casti obrazovky vybrany spravny `Month` a `Year`.
+
+### Problem: nejde zadat nulovu odmenu
+
+Aktualne pravidlo pre manualnu sumu:
+
+- prazdne pole = automaticky vypocet,
+- `0.00` = manualne nastavena odmena presne nula,
+- vyssia suma = manualne nastavena suma,
+- vymazanie hodnoty a ulozenie = navrat na automaticky vypocet.
+
+### View vs Print PDF
+
+V `Yearly Rewards Summary` ma kazdy user dve akcie:
+
+```text
+View
+Print PDF
+```
+
+`View` otvori nahlad na obrazovke v novom okne/tabe. `Print PDF` ulozi alebo stiahne PDF ako doteraz. Nahlad sa zatvara tlacidlom `Close` v pravom hornom rohu.
 
 ## Problem: aplikacia sa nespusti
 

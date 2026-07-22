@@ -11,6 +11,12 @@
     padding: 6px 10px !important;
     line-height: 1.1;
   }
+  .reward-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
   @media (max-width: 700px) {
     .container { padding: 20px; }
   }
@@ -71,7 +77,7 @@
             <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Nickname</th>
             <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Role</th>
             <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Total (Range)</th>
-            <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Print</th>
+            <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -83,7 +89,10 @@
             <td style="padding:12px; border-bottom:1px solid var(--border);">{{ r.role }}</td>
             <td style="padding:12px; border-bottom:1px solid var(--border);">{{ "%.2f"|format(r.computed_amount or 0) }} EUR</td>
             <td style="padding:12px; border-bottom:1px solid var(--border);">
-              <a class="btn-small btn-print-pdf" href="{{ url_for('variable_rewards_summary_print_user', user_id=r.id, year=year, month_from=month_from, month_to=month_to) }}">Print PDF</a>
+              <div class="reward-actions">
+                <a class="btn-small btn-print-pdf" target="_blank" rel="noopener" href="{{ url_for('variable_rewards_summary_view_user', user_id=r.id, year=year, month_from=month_from, month_to=month_to) }}">View</a>
+                <a class="btn-small btn-print-pdf" href="{{ url_for('variable_rewards_summary_print_user', user_id=r.id, year=year, month_from=month_from, month_to=month_to) }}">Print PDF</a>
+              </div>
             </td>
           </tr>
         {% endfor %}

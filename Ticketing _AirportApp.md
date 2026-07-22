@@ -2,9 +2,9 @@
 
 Tento manual popisuje aktualne fungovanie AirportApp pre End Usera, Deputy a Admina.
 
-## Aktualizacia 2026-06-17
+## Aktualne security a data pravidla
 
-Security release `release_2026-06-17_security` prinasa:
+Aktualna verzia aplikacie pouziva:
 
 1. Per-install secret subor `airport_app.secret` namiesto pevneho Flask `SECRET_KEY`.
 2. Docasny 15-minutovy rate limit pre neuspesne login pokusy.
@@ -233,15 +233,23 @@ Spravanie:
 
 1. Rewards su naviazane na airport service fees za vybrany mesiac.
 2. Admin moze nastavit:
-- aktivny/neaktivny user pre rewards,
+- `Reward active this month` pre konkretneho usera, mesiac a rok,
 - globalne percento,
 - manualnu sumu pre konkretneho usera.
-3. `Save` uklada snapshot ako audit/historiu.
-4. Obrazovky a PDF exporty pocitaju z aktualnych live DB hodnot.
-5. Dostupne exporty:
+3. `Reward active this month` neprepisuje historiu. Ak sa user vypne v juni, ovplyvni sa iba jun, nie predchadzajuce mesiace.
+4. Manualna suma funguje takto:
+- prazdne pole = automaticky vypocet,
+- `0.00` = manualne nastavena nulova odmena,
+- vyssia suma = manualne nastavena suma,
+- vymazanie pola = navrat na automaticky vypocet.
+5. `Save` uklada snapshot ako audit/historiu.
+6. Obrazovky a PDF exporty pocitaju z aktualnych live DB hodnot.
+7. Dostupne exporty a nahlady:
 - PDF pre vsetkych,
 - PDF pre jedneho usera,
-- yearly summary PDF za rozsah mesiacov.
+- yearly summary PDF za rozsah mesiacov,
+- `View` v Yearly Rewards Summary pre nahlad na obrazovke,
+- `Print PDF` v Yearly Rewards Summary pre ulozenie PDF.
 
 ## 10. Users a security administracia
 
@@ -331,9 +339,21 @@ Admin ma dostupne:
 
 - SMTP konfiguraciu,
 - notification nastavenia,
-- DB export.
+- DB export,
+- external backups,
+- restore from backup.
 
 DB export stiahne aktualny `airport_app.db`.
+
+External backups:
+
+- Admin vybera cielovy priecinok cez `Choose folder`,
+- cesta sa ulozi do `backup_settings.json`,
+- automaticke ZIP zalohy sa ukladaju mimo hlavneho app priecinka,
+- daily, weekly a monthly retention drzi 10 ZIP backupov pre kazdy typ,
+- `Create backup now` vytvori manualny ZIP backup,
+- `Restore from backup` otvori Windows vyber ZIP suboru a obnovi databazy,
+- pred obnovou sa aktualne `.db` subory ulozia do `backups/pre_restore_YYYY-MM-DD_HHMMSS/`.
 
 ## 14. Prenos na nove PC
 
@@ -400,13 +420,19 @@ dist/install_update.exe
 Aktualny release:
 
 ```text
-release_2026-06-17_security/
+release_CURRENT_2026-07-22_variable_rewards_view/
   AirportApp.exe
   install_update.exe
+  RELEASE_INFO.md
+  app_release.json
   RELEASE_NOTES.txt
+  README.md
+  TROUBLESHOOTING.md
 ```
 
 Release priecinok nema obsahovat `airport_app.db`, pokial nejde vyslovene o demo/fresh install balik.
+
+Pre existujuceho zakaznika posielaj `install_update.exe`. Pre uplne prvu instalaciu na novom PC pouzi `AirportApp.exe`, `RELEASE_INFO.md` a `app_release.json`.
 
 ## 17. Troubleshooting
 

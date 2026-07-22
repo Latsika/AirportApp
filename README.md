@@ -17,7 +17,7 @@ The server is bound to `127.0.0.1`, so it is not exposed to other computers on t
 Latest release folder:
 
 ```text
-release_2026-07-17_release_info
+release_CURRENT_2026-07-22_variable_rewards_view
 ```
 
 Release contents:
@@ -28,13 +28,12 @@ install_update.exe
 RELEASE_INFO.md
 app_release.json
 RELEASE_NOTES.txt
+README.md
+TROUBLESHOOTING.md
+Ticketing _AirportApp.md
 ```
 
-Release ID:
-
-```text
-20260717T054514Z-8993374
-```
+Release ID is generated during build and is stored in `RELEASE_INFO.md` and `app_release.json`.
 
 This release folder intentionally does not include `airport_app.db`. Existing customer data must not be overwritten by a release or test database.
 
@@ -283,11 +282,15 @@ Notification triggers include:
 ## Variable Rewards
 
 - Rewards are based on monthly airport service fees.
-- Manual overrides per user are supported.
+- `Reward active this month` is month-specific. If a user is disabled for June, previous months are not changed.
+- Empty manual amount field means automatic calculation.
+- Manual amount `0.00` or any higher value is an explicit manual override.
+- Clearing the manual amount field returns that user to automatic calculation.
 - Current rewards screens and PDF exports are calculated from live database values.
 - Saved snapshots remain available as audit/history data in `variable_rewards_snapshots`.
 - Per-user and full-list PDF exports are available.
 - Yearly rewards summary supports month ranges.
+- Yearly rewards summary has `View` for on-screen preview and `Print PDF` for saving/downloading the PDF.
 
 ## Build And Release
 
@@ -324,15 +327,20 @@ For customer updates, send `install_update.exe`. The updater:
 For a release package, create a folder like:
 
 ```text
-release_YYYY-MM-DD_name/
+release_CURRENT_YYYY-MM-DD_name/
   AirportApp.exe
   install_update.exe
   RELEASE_INFO.md
   app_release.json
   RELEASE_NOTES.txt
+  README.md
+  TROUBLESHOOTING.md
+  Ticketing _AirportApp.md
 ```
 
 Do not include a customer or test `airport_app.db` in release folders unless the release is explicitly a fresh demo/test package.
+
+The customer file for an existing installation is `install_update.exe`. Use `AirportApp.exe` directly only for a clean first install or a manually copied portable app folder.
 
 ## Moving To Another PC
 

@@ -104,7 +104,7 @@
           <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Role</th>
           <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">%</th>
           <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Total Amount</th>
-          <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Active</th>
+          <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Reward active this month</th>
         </tr>
       </thead>
       <tbody>
@@ -138,6 +138,8 @@
           <td style="padding:12px; border-bottom:1px solid var(--border);">
             <form method="post" action="{{ url_for('variable_rewards_active', user_id=u.id) }}" style="margin:0;" data-user-id="{{ u.id }}">
               <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+              <input type="hidden" name="month" value="{{ selected_month }}">
+              <input type="hidden" name="year" value="{{ selected_year }}">
               <label style="display:inline-flex; align-items:center; gap:8px;">
                 <input class="active-toggle" type="checkbox" name="active" {% if u.active %}checked{% endif %}>
                 <span class="muted">Active</span>
@@ -184,7 +186,7 @@
       const rowMeta = rows.map(r => {
         const manualInput = r.querySelector(".manual-input");
         const manualValue = manualInput ? parseAmount(manualInput.value) : parseAmount(r.querySelector("input[readonly]")?.value || "");
-        const hasManual = Number.isFinite(manualValue) && manualValue > 0;
+        const hasManual = manualInput ? manualInput.value.trim() !== "" : false;
         const isActive = !!r.querySelector(".active-toggle")?.checked;
         if (isActive && hasManual) manualSum += manualValue;
         if (isActive && !hasManual) activeWithoutManual += 1;
@@ -245,6 +247,9 @@
         const token = form.querySelector("input[name='csrf_token']")?.value || "";
         const params = new URLSearchParams();
         if (token) params.set("csrf_token", token);
+        form.querySelectorAll("input[type='hidden']").forEach(input => {
+          if (input.name && input.name !== "csrf_token") params.set(input.name, input.value || "");
+        });
         if (cb.checked) params.set("active", "on");
         fetch(action, {
           method: "POST",

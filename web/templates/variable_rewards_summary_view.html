@@ -1,0 +1,105 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 100vw; }
+  body { padding: 0; }
+  .app-shell { max-width: none; }
+  .container { width: 100vw; max-width: 100vw; border-radius: 0; }
+  .preview-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .preview-title {
+    margin: 0;
+  }
+  .preview-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin: 12px 0 16px;
+  }
+  .preview-kv {
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-1);
+  }
+  .preview-kv strong {
+    display: block;
+    margin-bottom: 4px;
+  }
+  @media (max-width: 700px) {
+    .container { padding: 20px; }
+    .preview-head { align-items: stretch; flex-direction: column; }
+    .preview-head .pill { width: fit-content; margin-left: auto; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="preview-head">
+  <div>
+    <h2 class="preview-title">Yearly Summary Preview</h2>
+    <div class="muted" style="margin-top:6px;">{{ month_from_name }}-{{ month_to_name }} {{ year }}</div>
+  </div>
+  <button type="button" class="pill" id="closePreviewBtn" style="height:44px;">Close</button>
+</div>
+
+<div class="preview-meta">
+  <div class="preview-kv">
+    <strong>Full name</strong>
+    <span>{{ user.fullname }}</span>
+  </div>
+  <div class="preview-kv">
+    <strong>Nickname</strong>
+    <span>{{ user.nickname }}</span>
+  </div>
+  <div class="preview-kv">
+    <strong>Role</strong>
+    <span>{{ user.role }}</span>
+  </div>
+  <div class="preview-kv">
+    <strong>Total</strong>
+    <span>{{ "%.2f"|format(total or 0) }} EUR</span>
+  </div>
+</div>
+
+<div style="overflow-x:auto;">
+  <table style="width:100%; border-collapse:collapse; border-radius:14px; overflow:hidden; border:1px solid var(--border); background:var(--bg-1);">
+    <thead>
+      <tr>
+        <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Month</th>
+        <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Amount</th>
+        <th style="padding:12px; border-bottom:1px solid var(--border); text-align:left;">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr>
+          <td style="padding:12px; border-bottom:1px solid var(--border);">{{ row.month_name }} {{ year }}</td>
+          <td style="padding:12px; border-bottom:1px solid var(--border);">{{ "%.2f"|format(row.amount or 0) }} EUR</td>
+          <td style="padding:12px; border-bottom:1px solid var(--border);">{{ "%.2f"|format(row.total or 0) }} EUR</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+  (function () {
+    const closeBtn = document.getElementById("closePreviewBtn");
+    const fallbackUrl = "{{ close_url }}";
+    if (!closeBtn) return;
+    closeBtn.addEventListener("click", () => {
+      window.close();
+      setTimeout(() => {
+        if (!window.closed) window.location.href = fallbackUrl;
+      }, 100);
+    });
+  })();
+</script>
+{% endblock %}

@@ -2037,6 +2037,62 @@ def _run_external_backup_scheduler() -> None:
         pass
 
 
+def _variable_rewards_manual_key(year: int, month: int, user_id: int) -> str:
+    return f"variable_rewards_manual_{year}_{month:02d}_{user_id}"
+
+
+def _variable_rewards_active_key(year: int, month: int, user_id: int) -> str:
+    return f"variable_rewards_active_{year}_{month:02d}_{user_id}"
+
+
+def _load_variable_rewards_users(year: int, month: int, persist_defaults: bool = False) -> list[dict]:
+    active_prefix = f"variable_rewards_active_{year}_{month:02d}_%"
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, fullname, nickname, role, active "
+            "FROM users ORDER BY fullname COLLATE NOCASE ASC"
+        )
+        rows = cur.fetchall()
+        cur.execute(
+            "SELECT key, value FROM app_state WHERE key LIKE ?",
+            (active_prefix,),
+        )
+        active_state = {r["key"]: r["value"] for r in cur.fetchall()}
+
+        users = []
+        missing_defaults = []
+        for row in rows:
+            user_id = int(row["id"])
+            key = _variable_rewards_active_key(year, month, user_id)
+            raw_active = active_state.get(key)
+            if raw_active is None:
+                active = int(row["active"] or 0)
+                if persist_defaults:
+                    missing_defaults.append((key, str(active)))
+            else:
+                active = 1 if raw_active in {"1", "on", "true", "yes"} else 0
+            users.append(
+                {
+                    "id": user_id,
+                    "fullname": row["fullname"],
+                    "nickname": row["nickname"],
+                    "role": row["role"],
+                    "active": active,
+                    "account_active": int(row["active"] or 0),
+                }
+            )
+
+        if missing_defaults:
+            cur.executemany(
+                "INSERT OR IGNORE INTO app_state(key, value) VALUES(?, ?)",
+                missing_defaults,
+            )
+            conn.commit()
+
+    return users
+
+
 def _compute_variable_rewards_distribution(year: int, month: int):
     monthly_total = _compute_monthly_airport_total(year, month)
     percent_key = f"variable_rewards_percent_{year}_{month:02d}"
@@ -2048,47 +2104,42 @@ def _compute_variable_rewards_distribution(year: int, month: int):
     percent_value = round(min(100.0, max(0.0, percent_value)))
     reduced_total = monthly_total * (percent_value / 100)
 
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT id, fullname, nickname, role, active "
-            "FROM users ORDER BY fullname COLLATE NOCASE ASC"
-        )
-        users = cur.fetchall()
+    users = _load_variable_rewards_users(year, month, persist_defaults=True)
 
     manual_map = {}
     for u in users:
-        key = f"variable_rewards_manual_{year}_{month:02d}_{u['id']}"
+        key = _variable_rewards_manual_key(year, month, int(u["id"]))
         raw = get_app_state(key)
         if raw is None:
             continue
         try:
-            manual_map[u["id"]] = float(raw)
+            manual_map[int(u["id"])] = max(0.0, float(raw))
         except ValueError:
             continue
 
     active_users = [u for u in users if int(u["active"] or 0) == 1]
     active_manual_sum = sum(
-        manual_map.get(u["id"], 0.0) for u in active_users if manual_map.get(u["id"], 0.0) > 0
+        manual_map[int(u["id"])] for u in active_users if int(u["id"]) in manual_map
     )
     active_without_manual = [
-        u for u in active_users if manual_map.get(u["id"], 0.0) <= 0
+        u for u in active_users if int(u["id"]) not in manual_map
     ]
     remainder = max(0.0, reduced_total - active_manual_sum)
     per_user = remainder / len(active_without_manual) if active_without_manual else 0.0
 
     computed = []
     for u in users:
-        manual_amount = manual_map.get(u["id"], 0.0)
+        user_id = int(u["id"])
+        manual_amount = manual_map.get(user_id, 0.0)
         if int(u["active"] or 0) != 1:
             computed_amount = 0.0
-        elif manual_amount > 0:
+        elif user_id in manual_map:
             computed_amount = manual_amount
         else:
             computed_amount = per_user
         computed.append(
             {
-                "id": u["id"],
+                "id": user_id,
                 "fullname": u["fullname"],
                 "nickname": u["nickname"],
                 "role": u["role"],
@@ -2127,21 +2178,41 @@ def _compute_variable_rewards_range(year: int, month_from: int, month_to: int):
             "SELECT id, fullname, nickname, role, active "
             "FROM users ORDER BY fullname COLLATE NOCASE ASC"
         )
-        users = cur.fetchall()
+        raw_users = cur.fetchall()
         cur.execute(
             """
             SELECT key, value
             FROM app_state
-            WHERE key LIKE ? OR key LIKE ?
+            WHERE key LIKE ? OR key LIKE ? OR key LIKE ?
             """,
             (
                 f"variable_rewards_percent_{year}_%",
                 f"variable_rewards_manual_{year}_%",
+                f"variable_rewards_active_{year}_%",
             ),
         )
         app_state = {r["key"]: r["value"] for r in cur.fetchall()}
 
     for selected_month in range(month_from, month_to + 1):
+        users = []
+        for row in raw_users:
+            user_id = int(row["id"])
+            active_key = _variable_rewards_active_key(year, selected_month, user_id)
+            raw_active = app_state.get(active_key)
+            if raw_active is None:
+                active = int(row["active"] or 0)
+            else:
+                active = 1 if raw_active in {"1", "on", "true", "yes"} else 0
+            users.append(
+                {
+                    "id": user_id,
+                    "fullname": row["fullname"],
+                    "nickname": row["nickname"],
+                    "role": row["role"],
+                    "active": active,
+                }
+            )
+
         percent_raw = app_state.get(f"variable_rewards_percent_{year}_{selected_month:02d}") or "100"
         try:
             percent_value = float(percent_raw)
@@ -2153,22 +2224,23 @@ def _compute_variable_rewards_range(year: int, month_from: int, month_to: int):
 
         manual_map = {}
         for u in users:
-            raw = app_state.get(f"variable_rewards_manual_{year}_{selected_month:02d}_{u['id']}")
+            user_id = int(u["id"])
+            raw = app_state.get(_variable_rewards_manual_key(year, selected_month, user_id))
             if raw is None:
                 continue
             try:
-                manual_map[u["id"]] = float(raw)
+                manual_map[user_id] = max(0.0, float(raw))
             except ValueError:
                 continue
 
         active_users = [u for u in users if int(u["active"] or 0) == 1]
         active_manual_sum = sum(
-            manual_map.get(u["id"], 0.0)
+            manual_map[int(u["id"])]
             for u in active_users
-            if manual_map.get(u["id"], 0.0) > 0
+            if int(u["id"]) in manual_map
         )
         active_without_manual = [
-            u for u in active_users if manual_map.get(u["id"], 0.0) <= 0
+            u for u in active_users if int(u["id"]) not in manual_map
         ]
         remainder = max(0.0, reduced_total - active_manual_sum)
         per_user = remainder / len(active_without_manual) if active_without_manual else 0.0
@@ -2185,10 +2257,10 @@ def _compute_variable_rewards_range(year: int, month_from: int, month_to: int):
                     "computed_amount": 0.0,
                 },
             )
-            manual_amount = manual_map.get(u["id"], 0.0)
+            manual_amount = manual_map.get(user_id, 0.0)
             if int(u["active"] or 0) != 1:
                 amount = 0.0
-            elif manual_amount > 0:
+            elif user_id in manual_map:
                 amount = float(manual_amount)
             else:
                 amount = float(per_user)
@@ -4753,14 +4825,8 @@ def variable_rewards():
         year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
     except ValueError:
         year = datetime.now(timezone.utc).year
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT id, fullname, nickname, role, active "
-            "FROM users ORDER BY fullname COLLATE NOCASE ASC"
-        )
-        users_list = cur.fetchall()
-        monthly_total = _compute_monthly_airport_total(year, selected_month)
+    users_list = _load_variable_rewards_users(year, selected_month, persist_defaults=True)
+    monthly_total = _compute_monthly_airport_total(year, selected_month)
     percent_key = f"variable_rewards_percent_{year}_{selected_month:02d}"
     percent_raw = get_app_state(percent_key) or "100"
     try:
@@ -4770,7 +4836,7 @@ def variable_rewards():
     percent_value = round(min(100.0, max(0.0, percent_value)))
     manual_amounts = {}
     for u in users_list:
-        key = f"variable_rewards_manual_{year}_{selected_month:02d}_{u['id']}"
+        key = _variable_rewards_manual_key(year, selected_month, int(u["id"]))
         raw = get_app_state(key)
         if raw is None:
             continue
@@ -5617,16 +5683,27 @@ def airport_service_fee_delete(fee_id: int):
 def variable_rewards_active(user_id: int):
     require_csrf()
     active = _parse_bool_checkbox(request.form.get("active"))
+    month_raw = _sanitize(request.form.get("month"))
+    year_raw = _sanitize(request.form.get("year"))
+    try:
+        month = int(month_raw) if month_raw else datetime.now(timezone.utc).month
+    except ValueError:
+        month = datetime.now(timezone.utc).month
+    month = min(12, max(1, month))
+    try:
+        year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
+    except ValueError:
+        year = datetime.now(timezone.utc).year
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
         if not cur.fetchone():
             flash("User not found.")
-            return redirect(url_for("variable_rewards"))
-        cur.execute("UPDATE users SET active = ? WHERE id = ?", (active, user_id))
+            return redirect(url_for("variable_rewards", month=month, year=year))
         conn.commit()
-    flash("Active status updated.")
-    return redirect(url_for("variable_rewards"))
+    set_app_state(_variable_rewards_active_key(year, month, user_id), str(active))
+    flash("Monthly reward active status updated.")
+    return redirect(url_for("variable_rewards", month=month, year=year))
 
 
 @app.post("/variable_rewards/percent", endpoint="variable_rewards_percent")
@@ -5657,8 +5734,7 @@ def variable_rewards_percent():
 @admin_required
 def variable_rewards_manual(user_id: int):
     require_csrf()
-    amount = _parse_amount(request.form.get("manual_amount"))
-    amount = max(0.0, amount)
+    amount_raw = _sanitize(request.form.get("manual_amount"))
     month_raw = _sanitize(request.form.get("month"))
     year_raw = _sanitize(request.form.get("year"))
     try:
@@ -5670,7 +5746,13 @@ def variable_rewards_manual(user_id: int):
         year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
     except ValueError:
         year = datetime.now(timezone.utc).year
-    key = f"variable_rewards_manual_{year}_{month:02d}_{user_id}"
+    key = _variable_rewards_manual_key(year, month, user_id)
+    if amount_raw == "":
+        delete_app_state(key)
+        flash("Manual amount cleared. Automatic calculation is active.")
+        return redirect(url_for("variable_rewards", month=month, year=year))
+
+    amount = max(0.0, _parse_amount(amount_raw))
     set_app_state(key, str(amount))
     flash("Manual amount saved.")
     return redirect(url_for("variable_rewards", month=month, year=year))
@@ -5859,6 +5941,72 @@ def variable_rewards_summary_print_user(user_id: int):
     return _set_download_filename(
         resp,
         f"[SUMMARY] {user['fullname'] or user['nickname']} {year}-{month_from:02d}-{month_to:02d}.pdf",
+    )
+
+
+@app.get("/variable_rewards/summary/view/<int:user_id>", endpoint="variable_rewards_summary_view_user")
+@admin_required
+def variable_rewards_summary_view_user(user_id: int):
+    year_raw = _sanitize(request.args.get("year"))
+    month_from_raw = _sanitize(request.args.get("month_from"))
+    month_to_raw = _sanitize(request.args.get("month_to"))
+    try:
+        year = int(year_raw) if year_raw else datetime.now(timezone.utc).year
+    except ValueError:
+        year = datetime.now(timezone.utc).year
+    try:
+        month_from = int(month_from_raw) if month_from_raw else 1
+    except ValueError:
+        month_from = 1
+    try:
+        month_to = int(month_to_raw) if month_to_raw else datetime.now(timezone.utc).month
+    except ValueError:
+        month_to = datetime.now(timezone.utc).month
+    month_from = min(12, max(1, month_from))
+    month_to = min(12, max(1, month_to))
+    if month_to < month_from:
+        month_from, month_to = month_to, month_from
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, fullname, nickname, role FROM users WHERE id = ?", (user_id,))
+        user = cur.fetchone()
+        if not user:
+            flash("User not found.")
+            return redirect(url_for("variable_rewards_summary", year=year, month_from=month_from, month_to=month_to))
+
+    _, _, month_amounts_by_user = _compute_variable_rewards_range(year, month_from, month_to)
+    month_rows = month_amounts_by_user.get(user_id, {})
+
+    month_names = [
+        "", "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ]
+    rows = []
+    total = 0.0
+    for m in range(month_from, month_to + 1):
+        amount = float(month_rows.get(m, 0.0))
+        total += amount
+        rows.append(
+            {
+                "month": m,
+                "month_name": month_names[m],
+                "amount": amount,
+                "total": total,
+            }
+        )
+
+    return render_template(
+        "variable_rewards_summary_view.html",
+        user=user,
+        year=year,
+        month_from=month_from,
+        month_to=month_to,
+        month_from_name=month_names[month_from],
+        month_to_name=month_names[month_to],
+        rows=rows,
+        total=total,
+        close_url=url_for("variable_rewards_summary", year=year, month_from=month_from, month_to=month_to),
     )
 
 

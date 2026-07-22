@@ -1,9 +1,9 @@
 {
   "app": "AirportApp",
-  "release_id": "20260717T111558Z-3683723",
-  "built_at_utc": "2026-07-17T11:15:58+00:00",
-  "git_commit": "368372334ee5602f1e7c7f1007320aaf57587257",
-  "git_commit_short": "3683723",
+  "release_id": "20260722T071555Z-a22320f",
+  "built_at_utc": "2026-07-22T07:15:55+00:00",
+  "git_commit": "a22320f4ba5119a3cff7cc0024e0dc811846037a",
+  "git_commit_short": "a22320f",
   "working_tree": "dirty",
-  "source_changes": "M README.md\n M TROUBLESHOOTING.md\n M web/app.py\n M web/templates/account_settings.html\n?? utils/backup_manager.py"
+  "source_changes": "M README.md\n M TROUBLESHOOTING.md\n M \"Ticketing _AirportApp.md\"\n M web/app.py\n M web/templates/variable_rewards.html\n M web/templates/variable_rewards_summary.html\n?? web/templates/variable_rewards_summary_view.html"
 }

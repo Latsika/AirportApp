@@ -1,0 +1,37 @@
+AirportApp release_CURRENT_2026-07-22_variable_rewards_view
+
+Release ID:
+20260722T071555Z-a22320f
+
+Customer update file:
+install_update.exe
+
+Important:
+- This release folder does not include airport_app.db.
+- Do not overwrite a customer's existing app folder with this whole folder.
+- For an existing customer, run install_update.exe and select the folder containing the customer's AirportApp.exe.
+- The updater preserves customer data and replaces the application files.
+
+Included functionality:
+- Variable Rewards: Reward active state is now saved per selected month/year/user.
+- Variable Rewards: disabling a user for one month no longer changes previous months.
+- Variable Rewards: empty manual amount means automatic calculation.
+- Variable Rewards: 0.00 EUR is now a valid manual override.
+- Variable Rewards: clearing the manual amount field returns the user to automatic calculation.
+- Yearly Rewards Summary: added View next to Print PDF.
+- Yearly Rewards Summary: View opens an on-screen preview with app styling and Close button.
+- External backups and restore workflow remain available in Account settings.
+- Documentation updated for current install, update, backup, restore, and rewards behavior.
+
+Build outputs:
+- AirportApp.exe
+- install_update.exe
+- RELEASE_INFO.md
+- app_release.json
+- README.md
+- TROUBLESHOOTING.md
+- Ticketing _AirportApp.md
+
+SHA256:
+- AirportApp.exe: 88361D3D6207451048BDA0A694DC18A4740384F7DB9C03A55F47A61DE3D74F60
+- install_update.exe: 44F1E6A1B555C11D9377D116C5569539B967D90212EF81B697A755AD8168D748
