@@ -185,6 +185,19 @@ Pravidla:
 4. `Delete` je admin akcia.
 5. Zmeny sa loguju do sales logov.
 
+Aktualne vizualne spravanie Sales List:
+
+- `Sold At` je vpredu v tabulke.
+- datum sa zobrazuje vo formate `den.mesiac.rok`, napriklad `6.10.2026`.
+- cas predaja je pod datumom.
+- `Items` zobrazuje iba kody poloziek bez popisu.
+- `Item Count` je skryty iba zo zobrazenia v Sales List; data a backend vypocty ostavaju zachovane.
+- `CASH` je zelene a bold.
+- `CARD` je cervene a bold.
+- pri velkom okne sa tabulka prisposobi sirke okna.
+- pri mensom okne je horizontalny scrollbar dostupny v spodnej casti viditelnej tabulky.
+- airline nazov moze byt v Sales List zobrazeny vlastnou farbou a bold, ak Admin nastavi farbu pre danu airline.
+
 ## 7. Airlines, destinations a fees
 
 Admin spravuje:
@@ -195,6 +208,42 @@ Admin spravuje:
 - Airport service fees.
 
 Zmena ceny fee neprepise historicke predaje. Historicke zaznamy ostanu s povodnou cenou, nove predaje pouziju aktualnu cenu.
+
+### 7.1 Farba airline v Sales List
+
+Admin moze nastavit farbu pisma pre kazdu airline:
+
+```text
+Manage Airlines -> EDIT
+```
+
+Vo formulari je sekcia:
+
+```text
+Sales List text color
+Use custom color in Sales List
+```
+
+Postup:
+
+1. Otvor `Manage Airlines`.
+2. Klikni `EDIT` pri konkretnej airline.
+3. Zapni `Use custom color in Sales List`.
+4. Vyber farbu cez paletu.
+5. Skontroluj preview nazvu airline.
+6. Klikni `SAVE`.
+
+Farba sa pouzije iba v `Sales List`. Nazov airline je v Sales List zobrazeny bold. Custom airline zadana priamo pri predaji nema vlastnu farbu z master zoznamu.
+
+### 7.2 Light / Dark mode
+
+Aplikacia ma prepnutelny svetly a tmavy rezim:
+
+```text
+User menu -> Switch to Dark / Switch to Light
+```
+
+Light mode je default. Vybrany rezim sa ulozi v prehliadaci a ostane zachovany aj po restarte aplikacie.
 
 ## 8. Reporty
 
@@ -420,7 +469,7 @@ dist/install_update.exe
 Aktualny release:
 
 ```text
-release_CURRENT_2026-07-22_variable_rewards_view/
+release_2026-10-06_sales_list_theme_airline_colors/
   AirportApp.exe
   install_update.exe
   RELEASE_INFO.md
@@ -428,6 +477,7 @@ release_CURRENT_2026-07-22_variable_rewards_view/
   RELEASE_NOTES.txt
   README.md
   TROUBLESHOOTING.md
+  Ticketing _AirportApp.md
 ```
 
 Release priecinok nema obsahovat `airport_app.db`, pokial nejde vyslovene o demo/fresh install balik.

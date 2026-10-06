@@ -5,7 +5,22 @@
   :root { --container-max: 100vw; }
   body { padding: 0; }
   .app-shell { max-width: none; }
-  .container { width: 100vw; max-width: 100vw; border-radius: 0; }
+  .container {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .content-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
   @media (max-width: 700px) {
     .container { padding: 20px; }
   }
@@ -46,8 +61,24 @@
   .menu a:hover { background: var(--bg-0); text-decoration: none; }
   .menu a.active { border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56,189,248,.2); }
 
-  .table-wrap { overflow-x: auto; }
-  table { width:100%; border-collapse:collapse; border-radius:14px; overflow:visible; border:1px solid var(--border); background:var(--bg-1); min-width: 760px; }
+  .sales-list-body {
+    margin-top: 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .table-wrap {
+    flex: 1 1 auto;
+    min-height: 220px;
+    overflow: auto;
+    scrollbar-gutter: stable;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--bg-1);
+    touch-action: pan-x pan-y;
+  }
+  table { width:100%; min-width:0; border-collapse:collapse; border-radius:14px; overflow:visible; border:1px solid var(--border); background:var(--bg-1); }
   th, td { padding:12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
   th { font-weight:900; opacity:.95; }
   tr:last-child td { border-bottom:none; }
@@ -57,6 +88,10 @@
   .danger { border-color:#7f1d1d; background:#2a0f12; }
   .muted { opacity:.85; font-size:12px; }
   .items { white-space: pre-line; }
+  .airline-name { font-weight: 1000; }
+  .payment-method { font-weight: 1000; }
+  .payment-cash { color: #22c55e; }
+  .payment-card { color: #ef4444; }
   .filter-summary { display:flex; gap:10px; align-items:center; justify-content:flex-end; margin-top:12px; min-height:36px; }
   .filter-summary .muted { margin:0; }
   .pagination {
@@ -153,7 +188,7 @@
     line-height:1.2;
   }
 
-  @media (max-width: 900px) { table { min-width: 680px; } }
+  @media (max-width: 1200px) { table { min-width: 1180px; } }
 </style>
 {% endblock %}
 
@@ -178,13 +213,40 @@
   {% endif %}
 </div>
 
-<div style="margin-top:12px;">
+<div class="sales-list-body">
   {% if (sales and sales|length > 0) or filters.active %}
     <div class="table-wrap">
     <table>
       <thead>
         <tr>
           <th>#</th>
+          <th class="filterable">
+            <button type="button" class="th-filter-toggle">Sold At</button>
+            {% if filters.date_from or filters.date_to %}<a class="filter-x" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">x</a>{% endif %}
+            <div class="filter-popover">
+              <form method="get" action="{{ url_for('sales_list') }}">
+                <input type="hidden" name="q" value="{{ filters.q }}">
+                <input type="hidden" name="pnr" value="{{ filters.pnr }}">
+                <input type="hidden" name="passenger_name" value="{{ filters.passenger_name }}">
+                <input type="hidden" name="airline_id" value="{{ filters.airline_id }}">
+                <input type="hidden" name="destination" value="{{ filters.destination }}">
+                <input type="hidden" name="payment_method" value="{{ filters.payment_method }}">
+                <input type="hidden" name="sold_by" value="{{ filters.sold_by }}">
+                <div class="filter-field">
+                  <label class="muted" for="filterDateFrom">Date from</label>
+                  <input id="filterDateFrom" type="date" name="date_from" value="{{ filters.date_from }}">
+                </div>
+                <div class="filter-field">
+                  <label class="muted" for="filterDateTo">Date to</label>
+                  <input id="filterDateTo" type="date" name="date_to" value="{{ filters.date_to }}">
+                </div>
+                <div class="filter-actions">
+                  <button type="submit">Apply</button>
+                  <a class="btn-small" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">Clear</a>
+                </div>
+              </form>
+            </div>
+          </th>
           <th class="filterable">
             <button type="button" class="th-filter-toggle">Airline</button>
             {% if filters.airline_id %}<a class="filter-x" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">x</a>{% endif %}
@@ -282,7 +344,6 @@
             </div>
           </th>
           <th>Items</th>
-          <th>Items Count</th>
           <th>Airline Fee</th>
           <th>Total</th>
           <th>Cash</th>
@@ -338,37 +399,10 @@
               </form>
             </div>
           </th>
-          <th class="filterable">
-            <button type="button" class="th-filter-toggle">Sold At</button>
-            {% if filters.date_from or filters.date_to %}<a class="filter-x" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">x</a>{% endif %}
-            <div class="filter-popover">
-              <form method="get" action="{{ url_for('sales_list') }}">
-                <input type="hidden" name="q" value="{{ filters.q }}">
-                <input type="hidden" name="pnr" value="{{ filters.pnr }}">
-                <input type="hidden" name="passenger_name" value="{{ filters.passenger_name }}">
-                <input type="hidden" name="airline_id" value="{{ filters.airline_id }}">
-                <input type="hidden" name="destination" value="{{ filters.destination }}">
-                <input type="hidden" name="payment_method" value="{{ filters.payment_method }}">
-                <input type="hidden" name="sold_by" value="{{ filters.sold_by }}">
-                <div class="filter-field">
-                  <label class="muted" for="filterDateFrom">Date from</label>
-                  <input id="filterDateFrom" type="date" name="date_from" value="{{ filters.date_from }}">
-                </div>
-                <div class="filter-field">
-                  <label class="muted" for="filterDateTo">Date to</label>
-                  <input id="filterDateTo" type="date" name="date_to" value="{{ filters.date_to }}">
-                </div>
-                <div class="filter-actions">
-                  <button type="submit">Apply</button>
-                  <a class="btn-small" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">Clear</a>
-                </div>
-              </form>
-            </div>
-          </th>
           <th>Actions</th>
         </tr>
         <tr id="filterPanelRow" class="filter-panel-row">
-          <th colspan="15" class="filter-panel-cell">
+          <th colspan="14" class="filter-panel-cell">
             <div id="filterPanelHost" class="filter-panel-host"></div>
           </th>
         </tr>
@@ -378,7 +412,15 @@
       {% for s in sales %}
         <tr>
           <td>{{ pagination.start + loop.index0 }}</td>
-          <td>{{ s.airline_name }}{% if s.airline_code %} ({{ s.airline_code }}){% endif %}</td>
+          <td class="muted">
+            {{ s.sold_at_display }}
+            {% if s.sold_at_time_display %}<br>{{ s.sold_at_time_display }}{% endif %}
+          </td>
+          <td>
+            <span class="airline-name"{% if s.airline_display_color %} style="color: {{ s.airline_display_color }};"{% endif %}>
+              {{ s.airline_name }}{% if s.airline_code %} ({{ s.airline_code }}){% endif %}
+            </span>
+          </td>
           <td>
             {% if s.destination_name and s.destination_code %}
               {{ s.destination_name }} ({{ s.destination_code }})
@@ -392,15 +434,13 @@
           </td>
           <td>{{ s.pnr or "-" }}</td>
           <td>{{ s.passenger_name or "-" }}</td>
-          <td class="muted items">{{ s.items_label }}</td>
-          <td>{{ s.items_count }}</td>
+          <td class="muted items">{{ s.items_label or "-" }}</td>
           <td>{{ s.airline_fee_total }}</td>
           <td>{{ s.total_amount }}</td>
           <td>{{ s.cash_amount }}</td>
           <td>{{ s.card_amount }}</td>
-          <td>{{ s.payment_method }}</td>
+          <td class="payment-method {% if s.payment_method == 'CASH' %}payment-cash{% elif s.payment_method == 'CARD' %}payment-card{% endif %}">{{ s.payment_method }}</td>
           <td>{{ s.sold_by_name or s.sold_by_nick or "-" }}</td>
-          <td class="muted">{{ s.sold_at_utc[:19].replace('T', ' ') if s.sold_at_utc else '' }}</td>
           <td>
             <div class="actions">
               <a class="btn-small" href="{{ url_for('sale_edit', sale_id=s.id) }}">Edit</a>
@@ -418,7 +458,7 @@
       {% endfor %}
       {% else %}
         <tr>
-          <td colspan="15" class="muted">No sales match the selected filters.</td>
+          <td colspan="14" class="muted">No sales match the selected filters.</td>
         </tr>
       {% endif %}
       </tbody>

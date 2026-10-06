@@ -261,6 +261,32 @@ def _replace_iso_date(value: str, new_date: str) -> str:
     return datetime.combine(parsed_date, current.timetz()).isoformat()
 
 
+def _parse_sales_list_datetime(value: str):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            return datetime.strptime(str(value)[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+
+
+def _format_sales_list_date(value: str) -> str:
+    parsed = _parse_sales_list_datetime(value)
+    if not parsed:
+        return str(value or "")
+    return f"{parsed.day}.{parsed.month}.{parsed.year}"
+
+
+def _format_sales_list_time(value: str) -> str:
+    parsed = _parse_sales_list_datetime(value)
+    if not parsed:
+        return ""
+    return parsed.strftime("%H:%M:%S")
+
+
 def _month_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m")
 
@@ -1531,6 +1557,13 @@ def _csrf_is_valid() -> bool:
 
 def _sanitize(value: str) -> str:
     return (value or "").strip()
+
+
+def _sanitize_hex_color(value: str) -> str:
+    value = _sanitize(value)
+    if re.fullmatch(r"#[0-9A-Fa-f]{6}", value):
+        return value.lower()
+    return ""
 
 
 def _ascii_filename(value: str) -> str:
@@ -3426,6 +3459,7 @@ def sales_list():
                 s.passenger_name,
                 {airline_name_expr} AS airline_name,
                 {airline_code_expr} AS airline_code,
+                CASE WHEN s.is_custom_airline = 1 THEN NULL ELSE a.display_color END AS airline_display_color,
                 {destination_name_expr} AS destination_name,
                 {destination_code_expr} AS destination_code,
                 s.sold_at_utc,
@@ -3446,24 +3480,9 @@ def sales_list():
                 (
                     SELECT GROUP_CONCAT(
                         CASE
-                            WHEN si.fee_source = 'airline' THEN
-                                CASE
-                                    WHEN COALESCE(af.fee_key, si.fee_key, '') != ''
-                                        THEN COALESCE(af.fee_key, si.fee_key) || ' - ' || COALESCE(af.fee_name, si.fee_name, si.fee_key)
-                                    ELSE COALESCE(af.fee_name, si.fee_name, si.fee_key)
-                                END
-                            WHEN si.fee_source = 'airport' THEN
-                                CASE
-                                    WHEN COALESCE(apf.fee_key, si.fee_key, '') != ''
-                                        THEN COALESCE(apf.fee_key, si.fee_key) || ' - ' || COALESCE(apf.fee_name, si.fee_name, si.fee_key)
-                                    ELSE COALESCE(apf.fee_name, si.fee_name, si.fee_key)
-                                END
-                            ELSE
-                                CASE
-                                    WHEN COALESCE(si.fee_key, '') != ''
-                                        THEN COALESCE(si.fee_key, '') || ' - ' || COALESCE(si.fee_name, si.fee_key)
-                                    ELSE COALESCE(si.fee_name, '')
-                                END
+                            WHEN si.fee_source = 'airline' THEN NULLIF(COALESCE(af.fee_key, si.fee_key, ''), '')
+                            WHEN si.fee_source = 'airport' THEN NULLIF(COALESCE(apf.fee_key, si.fee_key, ''), '')
+                            ELSE NULLIF(COALESCE(si.fee_key, ''), '')
                         END,
                         char(10)
                     )
@@ -3543,7 +3562,12 @@ def sales_list():
 
         sql += " ORDER BY s.id DESC LIMIT ? OFFSET ?"
         cur.execute(sql, [*params, per_page, offset])
-        rows = cur.fetchall()
+        rows = []
+        for row in cur.fetchall():
+            sale_row = dict(row)
+            sale_row["sold_at_display"] = _format_sales_list_date(sale_row.get("sold_at_utc"))
+            sale_row["sold_at_time_display"] = _format_sales_list_time(sale_row.get("sold_at_utc"))
+            rows.append(sale_row)
     filters = {
         "q": q_raw,
         "pnr": pnr_filter,
@@ -5490,7 +5514,7 @@ def airlines():
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, name, code, country, active, created_at_utc, updated_at_utc "
+            "SELECT id, name, code, country, active, display_color, created_at_utc, updated_at_utc "
             "FROM airlines ORDER BY name COLLATE NOCASE ASC"
         )
         items = cur.fetchall()
@@ -5507,6 +5531,11 @@ def airlines_add():
     name = _sanitize(request.form.get("name"))
     code = _sanitize(request.form.get("code"))
     country = _sanitize(request.form.get("country"))
+    display_color = (
+        _sanitize_hex_color(request.form.get("display_color"))
+        if request.form.get("display_color_enabled")
+        else ""
+    )
     active = _parse_bool_checkbox(request.form.get("active"))
     now = _utc_now_iso()
 
@@ -5525,10 +5554,10 @@ def airlines_add():
 
         cur.execute(
             """
-            INSERT INTO airlines (name, code, country, active, created_at_utc, updated_at_utc)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO airlines (name, code, country, active, display_color, created_at_utc, updated_at_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (name, code or None, country or None, active, now, now),
+            (name, code or None, country or None, active, display_color or None, now, now),
         )
         conn.commit()
 
@@ -5542,7 +5571,7 @@ def airline_detail(airline_id: int):
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, name, code, country, active, created_at_utc, updated_at_utc "
+            "SELECT id, name, code, country, active, display_color, created_at_utc, updated_at_utc "
             "FROM airlines WHERE id = ?",
             (airline_id,),
         )
@@ -6123,7 +6152,7 @@ def variable_rewards_print(user_id: int):
 def airlines_edit(airline_id: int):
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id, name, code, country, active FROM airlines WHERE id = ?", (airline_id,))
+        cur.execute("SELECT id, name, code, country, active, display_color FROM airlines WHERE id = ?", (airline_id,))
         airline = cur.fetchone()
 
     if not airline:
@@ -6137,6 +6166,11 @@ def airlines_edit(airline_id: int):
     name = _sanitize(request.form.get("name"))
     code = _sanitize(request.form.get("code"))
     country = _sanitize(request.form.get("country"))
+    display_color = (
+        _sanitize_hex_color(request.form.get("display_color"))
+        if request.form.get("display_color_enabled")
+        else ""
+    )
     active = _parse_bool_checkbox(request.form.get("active"))
     now = _utc_now_iso()
 
@@ -6156,10 +6190,10 @@ def airlines_edit(airline_id: int):
         cur.execute(
             """
             UPDATE airlines
-            SET name = ?, code = ?, country = ?, active = ?, updated_at_utc = ?
+            SET name = ?, code = ?, country = ?, active = ?, display_color = ?, updated_at_utc = ?
             WHERE id = ?
             """,
-            (name, code or None, country or None, active, now, airline_id),
+            (name, code or None, country or None, active, display_color or None, now, airline_id),
         )
         conn.commit()
 

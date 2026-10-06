@@ -1,0 +1,9 @@
+{
+  "app": "AirportApp",
+  "release_id": "20261006T085833Z-df9ba04",
+  "built_at_utc": "2026-10-06T08:58:33+00:00",
+  "git_commit": "df9ba047fc4df0abf52444192d7a969812bee936",
+  "git_commit_short": "df9ba04",
+  "working_tree": "dirty",
+  "source_changes": " M web/app.py\n M web/templates/sales_list.html"
+}

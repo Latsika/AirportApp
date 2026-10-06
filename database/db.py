@@ -476,6 +476,8 @@ def _migrate_airlines_table(conn: sqlite3.Connection) -> None:
         cur.execute("ALTER TABLE airlines ADD COLUMN country TEXT")
     if "active" not in cols:
         cur.execute("ALTER TABLE airlines ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+    if "display_color" not in cols:
+        cur.execute("ALTER TABLE airlines ADD COLUMN display_color TEXT")
     if "created_at_utc" not in cols:
         cur.execute("ALTER TABLE airlines ADD COLUMN created_at_utc TEXT")
     if "updated_at_utc" not in cols:
@@ -1221,6 +1223,7 @@ def init_db() -> None:
                 code TEXT,
                 country TEXT,
                 active INTEGER NOT NULL DEFAULT 1,
+                display_color TEXT,
                 created_at_utc TEXT NOT NULL,
                 updated_at_utc TEXT NOT NULL
             )

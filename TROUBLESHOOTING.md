@@ -209,7 +209,7 @@ Spravny postup:
 6. Updater skopiruje `RELEASE_INFO.md` a `app_release.json`.
 7. Data ostanu zachovane.
 
-Nepouzivajte cerstvy release priecinok ako nahradu celej zakaznickej instalacie, ak zakaznik uz ma data. Aktualny release priecinok `release_CURRENT_2026-07-22_variable_rewards_view` zamerne neobsahuje `airport_app.db`.
+Nepouzivajte cerstvy release priecinok ako nahradu celej zakaznickej instalacie, ak zakaznik uz ma data. Aktualny release priecinok `release_2026-10-06_sales_list_theme_airline_colors` zamerne neobsahuje `airport_app.db`.
 
 Po aktualizacii overte, ze v zakaznickom priecinku existuje:
 
@@ -226,6 +226,44 @@ install_update.exe
 ```
 
 `AirportApp.exe` z release priecinka je urceny na cistu instalaciu alebo manualny portable copy postup, nie na prepis celeho existujuceho zakaznickeho priecinka.
+
+## Problem: farba airline sa v Sales List nezobrazuje
+
+### Priznaky
+
+- V `Sales List` je airline stale standardnou farbou.
+- V `Manage Airlines -> EDIT` bola vybrana farba, ale po ulozeni sa neprejavila.
+
+### Kontrola
+
+1. Otvorte `Manage Airlines`.
+2. Kliknite `EDIT` pri danej airline.
+3. Skontrolujte, ze je zapnute:
+
+```text
+Use custom color in Sales List
+```
+
+4. Skontrolujte vybranu farbu a kliknite `SAVE`.
+5. Otvorte `Sales -> Sales List`.
+
+Poznamky:
+
+- Farba sa pouzije iba v `Sales List`.
+- Nazov airline v Sales List je bold.
+- Custom airline zadana priamo pri predaji nema vlastnu farbu z master zoznamu.
+
+## Problem: Light/Dark mode sa neprepne alebo ostane stary rezim
+
+Light/Dark mode je ulozeny v prehliadaci cez local storage.
+
+Postup:
+
+1. Otvorte user menu vpravo hore.
+2. Kliknite `Switch to Dark` alebo `Switch to Light`.
+3. Ak sa rezim nesprava spravne, zatvorte AirportApp a prehliadacove okno, potom aplikaciu spustite znova.
+
+Ak je potrebne resetovat ulozeny vyber rezimu, vycistite data webu/local storage pre lokalnu adresu AirportApp v pouzitom prehliadaci.
 
 ## Cista instalacia vs aktualizacia
 

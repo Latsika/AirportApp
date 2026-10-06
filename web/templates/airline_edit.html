@@ -4,6 +4,33 @@
 <style>
   :root { --container-max: 700px; }
   .muted { opacity:.85; font-size:12px; }
+  .color-enabled {
+    display:flex;
+    gap:10px;
+    align-items:center;
+    margin-top:6px;
+  }
+  .color-enabled input { width:auto; margin:0; }
+  .color-row {
+    display:grid;
+    grid-template-columns:96px 1fr;
+    gap:12px;
+    align-items:center;
+    margin:8px 0 12px;
+  }
+  .color-row input[type="color"] {
+    height:44px;
+    padding:4px;
+    margin:0;
+  }
+  .airline-color-preview {
+    padding:10px 12px;
+    border-radius:12px;
+    border:1px solid var(--border);
+    background:var(--bg-1);
+    font-weight:1000;
+  }
+  .save-row { margin-top:14px; }
 </style>
 {% endblock %}
 
@@ -22,11 +49,50 @@
   <label class="muted">Country</label>
   <input name="country" value="{{ airline.country or '' }}">
 
+  <label class="muted">Sales List text color</label>
+  {% set selected_color = airline.display_color if airline.display_color else '#2563eb' %}
+  <label class="muted color-enabled">
+    <input type="checkbox" name="display_color_enabled" id="displayColorEnabled" {% if airline.display_color %}checked{% endif %}>
+    Use custom color in Sales List
+  </label>
+  <div class="color-row">
+    <input type="color" name="display_color" id="displayColorInput" value="{{ selected_color }}">
+    <div id="airlineColorPreview" class="airline-color-preview" style="color:{{ selected_color }};">
+      {{ airline.name }}{% if airline.code %} ({{ airline.code }}){% endif %}
+    </div>
+  </div>
+
   <label class="muted" style="display:flex; gap:10px; align-items:center; margin-top:6px;">
     <input type="checkbox" name="active" {% if airline.active %}checked{% endif %} style="width:auto; margin:0;">
     Active
   </label>
 
-  <button type="submit">SAVE</button>
+  <div class="save-row">
+    <button type="submit">SAVE</button>
+  </div>
 </form>
+<script>
+  (function () {
+    const colorInput = document.getElementById("displayColorInput");
+    const enabledInput = document.getElementById("displayColorEnabled");
+    const preview = document.getElementById("airlineColorPreview");
+    const nameInput = document.querySelector('input[name="name"]');
+    const codeInput = document.querySelector('input[name="code"]');
+    if (!colorInput || !preview) return;
+
+    function updatePreview() {
+      const name = (nameInput && nameInput.value.trim()) || "Airline preview";
+      const code = (codeInput && codeInput.value.trim()) || "";
+      preview.style.color = colorInput.value;
+      preview.style.opacity = enabledInput && !enabledInput.checked ? "0.7" : "1";
+      preview.textContent = code ? `${name} (${code})` : name;
+    }
+
+    colorInput.addEventListener("input", updatePreview);
+    if (enabledInput) enabledInput.addEventListener("change", updatePreview);
+    if (nameInput) nameInput.addEventListener("input", updatePreview);
+    if (codeInput) codeInput.addEventListener("input", updatePreview);
+    updatePreview();
+  })();
+</script>
 {% endblock %}

@@ -1,8 +1,8 @@
 # AirportApp Release Info
 
-- Release ID: `20260722T071555Z-a22320f`
-- Built at UTC: `2026-07-22T07:15:55+00:00`
-- Git commit: `a22320f4ba5119a3cff7cc0024e0dc811846037a`
+- Release ID: `20261006T111351Z-df9ba04`
+- Built at UTC: `2026-10-06T11:13:51+00:00`
+- Git commit: `df9ba047fc4df0abf52444192d7a969812bee936`
 - Working tree: `dirty`
 
 This file is copied next to `AirportApp.exe` during install/update.
@@ -15,7 +15,11 @@ Source changes included in this build:
 - `M README.md`
 - ` M TROUBLESHOOTING.md`
 - ` M "Ticketing _AirportApp.md"`
+- ` M database/db.py`
 - ` M web/app.py`
-- ` M web/templates/variable_rewards.html`
-- ` M web/templates/variable_rewards_summary.html`
-- `?? web/templates/variable_rewards_summary_view.html`
+- ` M web/templates/airline_add.html`
+- ` M web/templates/airline_edit.html`
+- ` M web/templates/airline_form.html`
+- ` M web/templates/layout.html`
+- ` M web/templates/sales_list.html`
+- `?? rollback_points/`

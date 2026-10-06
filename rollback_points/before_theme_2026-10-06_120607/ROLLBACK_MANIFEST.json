@@ -1,0 +1,14 @@
+﻿{
+    "name":  "before_theme",
+    "timestamp":  "2026-10-06_120607",
+    "purpose":  "Rollback point before Day/Night theme changes",
+    "files":  [
+                  "web/app.py",
+                  "web/templates/sales_list.html",
+                  "dist/AirportApp.exe",
+                  "dist/RELEASE_INFO.md",
+                  "dist/app_release.json",
+                  "dist/airport_app.db",
+                  "dist/airport_app.secret"
+              ]
+}

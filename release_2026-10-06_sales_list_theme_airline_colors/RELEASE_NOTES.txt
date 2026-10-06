@@ -1,0 +1,40 @@
+﻿AirportApp release_2026-10-06_sales_list_theme_airline_colors
+
+Release ID:
+20261006T111351Z-df9ba04
+
+Customer update file:
+install_update.exe
+
+Important:
+- This release folder does not include airport_app.db.
+- Do not overwrite a customer's existing app folder with this whole folder.
+- For an existing customer, run install_update.exe and select the folder containing the customer's AirportApp.exe.
+- The updater preserves customer data and replaces the application files.
+- For a clean first install, copy AirportApp.exe, RELEASE_INFO.md, and app_release.json to a new local folder and start AirportApp.exe.
+
+Included functionality:
+- Sales List: Sold At moved near the start of the table.
+- Sales List: date format changed to day.month.year with time shown under the date.
+- Sales List: Items now shows item codes only, without descriptions.
+- Sales List: Item Count is hidden from the visible table while backend data/calculations remain unchanged.
+- Sales List: CASH is green/bold and CARD is red/bold in the Payment column.
+- Sales List: horizontal scrolling is available at the bottom of the visible table when the window is narrow; wide windows fit the table responsively.
+- App theme: added Light/Dark mode switch in the user menu; Light is the default and the selected mode is stored in browser local storage.
+- Manage Airlines: added Sales List text color setting for each airline with color picker and preview.
+- Sales List: airline names are bold and use the configured airline text color when enabled.
+- Database migration: airlines.display_color added as a nullable setting; existing airlines keep default styling until a custom color is enabled and saved.
+- Documentation updated for Sales List visual behavior, Light/Dark mode, airline color setup, update/install guidance, and troubleshooting.
+
+Build outputs:
+- AirportApp.exe
+- install_update.exe
+- RELEASE_INFO.md
+- app_release.json
+- README.md
+- TROUBLESHOOTING.md
+- Ticketing _AirportApp.md
+
+SHA256:
+- AirportApp.exe: 067BFD56BA9D08808F9F6FA8FA2C05036A69022621B316007EBAD7E42492315F
+- install_update.exe: 42EFF90AF33128D29789E1EEDD59AC62E042771EEDA3D28AC3D26550B48C702C

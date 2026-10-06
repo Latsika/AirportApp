@@ -1,0 +1,551 @@
+{% extends "layout.html" %}
+
+{% block page_style %}
+<style>
+  :root { --container-max: 100vw; }
+  body { padding: 0; }
+  .app-shell { max-width: none; }
+  .container {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .content-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  @media (max-width: 700px) {
+    .container { padding: 20px; }
+  }
+
+  .title {
+    text-align: center;
+    font-size: 36px;
+    font-weight: 1000;
+    margin: 0 0 14px;
+    letter-spacing: .6px;
+  }
+
+  .menu {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    padding: 12px;
+    border-radius: 16px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+  }
+
+  .menu a {
+    width: 100%;
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    color: #e2e8f0;
+    font-weight: 900;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: left;
+    display: block;
+  }
+
+  .menu a:hover { background: var(--bg-0); text-decoration: none; }
+  .menu a.active { border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56,189,248,.2); }
+
+  .sales-list-body {
+    margin-top: 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .table-wrap {
+    flex: 1 1 auto;
+    min-height: 220px;
+    overflow: auto;
+    scrollbar-gutter: stable;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--bg-1);
+    touch-action: pan-x pan-y;
+  }
+  table { width:100%; min-width:0; border-collapse:collapse; border-radius:14px; overflow:visible; border:1px solid var(--border); background:var(--bg-1); }
+  th, td { padding:12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { font-weight:900; opacity:.95; }
+  tr:last-child td { border-bottom:none; }
+
+  .btn-small { width:auto; margin:0; padding:8px 12px; border-radius:999px; border:1px solid var(--border); background:var(--bg-2); color:#e2e8f0; font-weight:900; text-decoration:none; cursor:pointer; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .danger { border-color:#7f1d1d; background:#2a0f12; }
+  .muted { opacity:.85; font-size:12px; }
+  .items { white-space: pre-line; }
+  .payment-method { font-weight: 1000; }
+  .payment-cash { color: #22c55e; }
+  .payment-card { color: #ef4444; }
+  .filter-summary { display:flex; gap:10px; align-items:center; justify-content:flex-end; margin-top:12px; min-height:36px; }
+  .filter-summary .muted { margin:0; }
+  .pagination {
+    display:flex;
+    gap:8px;
+    align-items:center;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+    margin-top:12px;
+  }
+  .page-link {
+    width:auto;
+    margin:0;
+    padding:8px 12px;
+    border-radius:999px;
+    border:1px solid var(--border);
+    background:var(--bg-2);
+    color:#e2e8f0;
+    font-weight:900;
+    text-decoration:none;
+  }
+  .page-link.active { border-color:#38bdf8; box-shadow:0 0 0 2px rgba(56,189,248,.2); }
+  .page-link.disabled { opacity:.45; pointer-events:none; }
+
+  th.filterable { position:relative; white-space:nowrap; }
+  .th-filter-toggle {
+    width:auto;
+    margin:0;
+    padding:8px 14px;
+    border:0;
+    border-radius:999px;
+    background:var(--accent);
+    color:#1b1b1b;
+    font:inherit;
+    font-weight:900;
+    line-height:1;
+    text-align:left;
+    cursor:pointer;
+  }
+  .th-filter-toggle:hover { filter:brightness(1.03); text-decoration:none; }
+  .filter-x {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:18px;
+    height:18px;
+    margin-left:6px;
+    border-radius:999px;
+    border:1px solid var(--border);
+    background:var(--bg-2);
+    color:#e2e8f0;
+    font-size:12px;
+    font-weight:900;
+    text-decoration:none;
+  }
+  .filter-popover {
+    display:none;
+    width:100%;
+    padding:12px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:var(--bg-2);
+  }
+  .filter-panel-row { display:none; }
+  .filter-panel-row.open { display:table-row; }
+  .filter-panel-cell {
+    padding:12px;
+    background:var(--bg-1);
+    border-bottom:1px solid var(--border);
+  }
+  .filter-panel-host .filter-popover { display:block; }
+  .filter-popover form {
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+    gap:10px;
+    align-items:end;
+    margin:0;
+  }
+  .filter-popover input,
+  .filter-popover select {
+    margin:0;
+    width:100%;
+    max-width:none;
+  }
+  .filter-actions { display:flex; gap:8px; align-items:center; }
+  .filter-actions button,
+  .filter-actions a { flex:1; text-align:center; }
+  .filter-field {
+    display:grid;
+    gap:6px;
+  }
+  .filter-field label {
+    margin:0;
+    line-height:1.2;
+  }
+
+  @media (max-width: 1200px) { table { min-width: 1180px; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2 class="title">Sales List</h2>
+
+<div class="menu">
+  <a href="{{ url_for('sales') }}">Sale</a>
+  <a href="{{ url_for('sale_new') }}">New Sale</a>
+  <a class="active" href="{{ url_for('sales_list') }}">Sales List</a>
+  <a href="{{ url_for('reports') }}">Reports</a>
+</div>
+
+<div class="filter-summary">
+  {% if filters.active %}
+    <a class="btn-small" href="{{ url_for('sales_list') }}">Clear</a>
+  {% endif %}
+  {% if pagination.total > 0 %}
+    <span class="muted">
+      Showing {{ pagination.start }}-{{ pagination.end }} of {{ pagination.total }}
+    </span>
+  {% endif %}
+</div>
+
+<div class="sales-list-body">
+  {% if (sales and sales|length > 0) or filters.active %}
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th class="filterable">
+            <button type="button" class="th-filter-toggle">Sold At</button>
+            {% if filters.date_from or filters.date_to %}<a class="filter-x" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">x</a>{% endif %}
+            <div class="filter-popover">
+              <form method="get" action="{{ url_for('sales_list') }}">
+                <input type="hidden" name="q" value="{{ filters.q }}">
+                <input type="hidden" name="pnr" value="{{ filters.pnr }}">
+                <input type="hidden" name="passenger_name" value="{{ filters.passenger_name }}">
+                <input type="hidden" name="airline_id" value="{{ filters.airline_id }}">
+                <input type="hidden" name="destination" value="{{ filters.destination }}">
+                <input type="hidden" name="payment_method" value="{{ filters.payment_method }}">
+                <input type="hidden" name="sold_by" value="{{ filters.sold_by }}">
+                <div class="filter-field">
+                  <label class="muted" for="filterDateFrom">Date from</label>
+                  <input id="filterDateFrom" type="date" name="date_from" value="{{ filters.date_from }}">
+                </div>
+                <div class="filter-field">
+                  <label class="muted" for="filterDateTo">Date to</label>
+                  <input id="filterDateTo" type="date" name="date_to" value="{{ filters.date_to }}">
+                </div>
+                <div class="filter-actions">
+                  <button type="submit">Apply</button>
+                  <a class="btn-small" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">Clear</a>
+                </div>
+              </form>
+            </div>
+          </th>
+          <th class="filterable">
+            <button type="button" class="th-filter-toggle">Airline</button>
+            {% if filters.airline_id %}<a class="filter-x" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">x</a>{% endif %}
+            <div class="filter-popover">
+              <form method="get" action="{{ url_for('sales_list') }}">
+                <input type="hidden" name="q" value="{{ filters.q }}">
+                <input type="hidden" name="pnr" value="{{ filters.pnr }}">
+                <input type="hidden" name="passenger_name" value="{{ filters.passenger_name }}">
+                <input type="hidden" name="destination" value="{{ filters.destination }}">
+                <input type="hidden" name="date_from" value="{{ filters.date_from }}">
+                <input type="hidden" name="date_to" value="{{ filters.date_to }}">
+                <input type="hidden" name="payment_method" value="{{ filters.payment_method }}">
+                <input type="hidden" name="sold_by" value="{{ filters.sold_by }}">
+                <select name="airline_id" required>
+                  <option value="">All airlines</option>
+                  {% for a in airlines %}
+                    <option value="{{ a.id }}" {% if filters.airline_id == a.id|string %}selected{% endif %}>
+                      {{ a.name }}{% if a.code %} ({{ a.code }}){% endif %}
+                    </option>
+                  {% endfor %}
+                </select>
+                <div class="filter-actions">
+                  <button type="submit">Apply</button>
+                  <a class="btn-small" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">Clear</a>
+                </div>
+              </form>
+            </div>
+          </th>
+          <th class="filterable">
+            <button type="button" class="th-filter-toggle">Destination</button>
+            {% if filters.destination %}<a class="filter-x" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">x</a>{% endif %}
+            <div class="filter-popover">
+              <form method="get" action="{{ url_for('sales_list') }}">
+                <input type="hidden" name="q" value="{{ filters.q }}">
+                <input type="hidden" name="pnr" value="{{ filters.pnr }}">
+                <input type="hidden" name="passenger_name" value="{{ filters.passenger_name }}">
+                <input type="hidden" name="airline_id" value="{{ filters.airline_id }}">
+                <input type="hidden" name="date_from" value="{{ filters.date_from }}">
+                <input type="hidden" name="date_to" value="{{ filters.date_to }}">
+                <input type="hidden" name="payment_method" value="{{ filters.payment_method }}">
+                <input type="hidden" name="sold_by" value="{{ filters.sold_by }}">
+                <input name="destination" list="destinationsDatalist" placeholder="Type destination..." value="{{ filters.destination }}">
+                <datalist id="destinationsDatalist">
+                  {% for d in destinations %}
+                    <option value="{% if d.dest_name and d.dest_code %}{{ d.dest_name }} ({{ d.dest_code }}){% elif d.dest_name %}{{ d.dest_name }}{% else %}{{ d.dest_code }}{% endif %}">
+                  {% endfor %}
+                </datalist>
+                <div class="filter-actions">
+                  <button type="submit">Apply</button>
+                  <a class="btn-small" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">Clear</a>
+                </div>
+              </form>
+            </div>
+          </th>
+          <th class="filterable">
+            <button type="button" class="th-filter-toggle">PNR</button>
+            {% if filters.pnr %}<a class="filter-x" href="{{ url_for('sales_list', q=filters.q, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">x</a>{% endif %}
+            <div class="filter-popover">
+              <form method="get" action="{{ url_for('sales_list') }}">
+                <input type="hidden" name="q" value="{{ filters.q }}">
+                <input type="hidden" name="passenger_name" value="{{ filters.passenger_name }}">
+                <input type="hidden" name="airline_id" value="{{ filters.airline_id }}">
+                <input type="hidden" name="destination" value="{{ filters.destination }}">
+                <input type="hidden" name="date_from" value="{{ filters.date_from }}">
+                <input type="hidden" name="date_to" value="{{ filters.date_to }}">
+                <input type="hidden" name="payment_method" value="{{ filters.payment_method }}">
+                <input type="hidden" name="sold_by" value="{{ filters.sold_by }}">
+                <input name="pnr" placeholder="Type PNR..." value="{{ filters.pnr }}">
+                <div class="filter-actions">
+                  <button type="submit">Apply</button>
+                  <a class="btn-small" href="{{ url_for('sales_list', q=filters.q, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">Clear</a>
+                </div>
+              </form>
+            </div>
+          </th>
+          <th class="filterable">
+            <button type="button" class="th-filter-toggle">Passenger Name</button>
+            {% if filters.passenger_name %}<a class="filter-x" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, airline_id=filters.airline_id, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">x</a>{% endif %}
+            <div class="filter-popover">
+              <form method="get" action="{{ url_for('sales_list') }}">
+                <input type="hidden" name="q" value="{{ filters.q }}">
+                <input type="hidden" name="pnr" value="{{ filters.pnr }}">
+                <input type="hidden" name="airline_id" value="{{ filters.airline_id }}">
+                <input type="hidden" name="destination" value="{{ filters.destination }}">
+                <input type="hidden" name="date_from" value="{{ filters.date_from }}">
+                <input type="hidden" name="date_to" value="{{ filters.date_to }}">
+                <input type="hidden" name="payment_method" value="{{ filters.payment_method }}">
+                <input type="hidden" name="sold_by" value="{{ filters.sold_by }}">
+                <input name="passenger_name" placeholder="Type passenger..." value="{{ filters.passenger_name }}">
+                <div class="filter-actions">
+                  <button type="submit">Apply</button>
+                  <a class="btn-small" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, airline_id=filters.airline_id, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method, sold_by=filters.sold_by) }}">Clear</a>
+                </div>
+              </form>
+            </div>
+          </th>
+          <th>Items</th>
+          <th>Airline Fee</th>
+          <th>Total</th>
+          <th>Cash</th>
+          <th>Card</th>
+          <th class="filterable">
+            <button type="button" class="th-filter-toggle">Payment</button>
+            {% if filters.payment_method %}<a class="filter-x" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, sold_by=filters.sold_by) }}">x</a>{% endif %}
+            <div class="filter-popover">
+              <form method="get" action="{{ url_for('sales_list') }}">
+                <input type="hidden" name="q" value="{{ filters.q }}">
+                <input type="hidden" name="pnr" value="{{ filters.pnr }}">
+                <input type="hidden" name="passenger_name" value="{{ filters.passenger_name }}">
+                <input type="hidden" name="airline_id" value="{{ filters.airline_id }}">
+                <input type="hidden" name="destination" value="{{ filters.destination }}">
+                <input type="hidden" name="date_from" value="{{ filters.date_from }}">
+                <input type="hidden" name="date_to" value="{{ filters.date_to }}">
+                <input type="hidden" name="sold_by" value="{{ filters.sold_by }}">
+                <select name="payment_method" required>
+                  <option value="">All payments</option>
+                  <option value="CASH" {% if filters.payment_method == 'CASH' %}selected{% endif %}>Cash</option>
+                  <option value="CARD" {% if filters.payment_method == 'CARD' %}selected{% endif %}>Card</option>
+                </select>
+                <div class="filter-actions">
+                  <button type="submit">Apply</button>
+                  <a class="btn-small" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, sold_by=filters.sold_by) }}">Clear</a>
+                </div>
+              </form>
+            </div>
+          </th>
+          <th class="filterable">
+            <button type="button" class="th-filter-toggle">Sold By</button>
+            {% if filters.sold_by %}<a class="filter-x" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method) }}">x</a>{% endif %}
+            <div class="filter-popover">
+              <form method="get" action="{{ url_for('sales_list') }}">
+                <input type="hidden" name="q" value="{{ filters.q }}">
+                <input type="hidden" name="pnr" value="{{ filters.pnr }}">
+                <input type="hidden" name="passenger_name" value="{{ filters.passenger_name }}">
+                <input type="hidden" name="airline_id" value="{{ filters.airline_id }}">
+                <input type="hidden" name="destination" value="{{ filters.destination }}">
+                <input type="hidden" name="date_from" value="{{ filters.date_from }}">
+                <input type="hidden" name="date_to" value="{{ filters.date_to }}">
+                <input type="hidden" name="payment_method" value="{{ filters.payment_method }}">
+                <input name="sold_by" list="sellersDatalist" placeholder="Type seller..." value="{{ filters.sold_by }}">
+                <datalist id="sellersDatalist">
+                  {% for u in sellers %}
+                    <option value="{{ u.fullname or u.nickname }}">
+                  {% endfor %}
+                </datalist>
+                <div class="filter-actions">
+                  <button type="submit">Apply</button>
+                  <a class="btn-small" href="{{ url_for('sales_list', q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method) }}">Clear</a>
+                </div>
+              </form>
+            </div>
+          </th>
+          <th>Actions</th>
+        </tr>
+        <tr id="filterPanelRow" class="filter-panel-row">
+          <th colspan="14" class="filter-panel-cell">
+            <div id="filterPanelHost" class="filter-panel-host"></div>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+      {% if sales and sales|length > 0 %}
+      {% for s in sales %}
+        <tr>
+          <td>{{ pagination.start + loop.index0 }}</td>
+          <td class="muted">
+            {{ s.sold_at_display }}
+            {% if s.sold_at_time_display %}<br>{{ s.sold_at_time_display }}{% endif %}
+          </td>
+          <td>{{ s.airline_name }}{% if s.airline_code %} ({{ s.airline_code }}){% endif %}</td>
+          <td>
+            {% if s.destination_name and s.destination_code %}
+              {{ s.destination_name }} ({{ s.destination_code }})
+            {% elif s.destination_name %}
+              {{ s.destination_name }}
+            {% elif s.destination_code %}
+              {{ s.destination_code }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>{{ s.pnr or "-" }}</td>
+          <td>{{ s.passenger_name or "-" }}</td>
+          <td class="muted items">{{ s.items_label or "-" }}</td>
+          <td>{{ s.airline_fee_total }}</td>
+          <td>{{ s.total_amount }}</td>
+          <td>{{ s.cash_amount }}</td>
+          <td>{{ s.card_amount }}</td>
+          <td class="payment-method {% if s.payment_method == 'CASH' %}payment-cash{% elif s.payment_method == 'CARD' %}payment-card{% endif %}">{{ s.payment_method }}</td>
+          <td>{{ s.sold_by_name or s.sold_by_nick or "-" }}</td>
+          <td>
+            <div class="actions">
+              <a class="btn-small" href="{{ url_for('sale_edit', sale_id=s.id) }}">Edit</a>
+              {% if session.role == 'Admin' %}
+              <form method="post" action="{{ url_for('sales_delete', sale_id=s.id) }}"
+                    onsubmit="return confirm('Delete this sale record?');"
+                    style="display:inline; margin:0;">
+                <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+                <button class="btn-small danger" type="submit">Delete</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="14" class="muted">No sales match the selected filters.</td>
+        </tr>
+      {% endif %}
+      </tbody>
+    </table>
+    </div>
+    {% if pagination.total_pages > 1 %}
+      <nav class="pagination" aria-label="Sales pagination">
+        {% set args = dict(q=filters.q, pnr=filters.pnr, passenger_name=filters.passenger_name, airline_id=filters.airline_id, destination=filters.destination, date_from=filters.date_from, date_to=filters.date_to, payment_method=filters.payment_method, sold_by=filters.sold_by) %}
+        {% if pagination.page > 1 %}
+          <a class="page-link" href="{{ url_for('sales_list', page=pagination.page - 1, **args) }}">Previous</a>
+        {% else %}
+          <span class="page-link disabled">Previous</span>
+        {% endif %}
+        {% if pagination.window_pages[0] > 1 %}
+          <a class="page-link" href="{{ url_for('sales_list', page=pagination.prev_block_page, **args) }}">...</a>
+        {% endif %}
+        {% for p in pagination.window_pages %}
+          <a class="page-link {% if p == pagination.page %}active{% endif %}" href="{{ url_for('sales_list', page=p, **args) }}">{{ p }}</a>
+        {% endfor %}
+        {% if pagination.window_pages[-1] < pagination.total_pages %}
+          <a class="page-link" href="{{ url_for('sales_list', page=pagination.next_block_page, **args) }}">...</a>
+        {% endif %}
+        {% if pagination.page < pagination.total_pages %}
+          <a class="page-link" href="{{ url_for('sales_list', page=pagination.page + 1, **args) }}">Next</a>
+        {% else %}
+          <span class="page-link disabled">Next</span>
+        {% endif %}
+      </nav>
+    {% endif %}
+    {% else %}
+      <p class="muted">No sales yet.</p>
+    {% endif %}
+</div>
+<script>
+  (function () {
+    const headers = document.querySelectorAll("th.filterable");
+    const panelRow = document.getElementById("filterPanelRow");
+    const panelHost = document.getElementById("filterPanelHost");
+    let activeHeader = null;
+    let activePopover = null;
+
+    function restoreActivePopover() {
+      if (activeHeader && activePopover) {
+        activeHeader.appendChild(activePopover);
+      }
+      activeHeader = null;
+      activePopover = null;
+    }
+
+    function closePanel() {
+      headers.forEach(header => header.classList.remove("filter-open"));
+      restoreActivePopover();
+      if (panelRow) panelRow.classList.remove("open");
+    }
+
+    function openPanel(header) {
+      const popover = header.querySelector(".filter-popover");
+      if (!popover || !panelRow || !panelHost) return;
+
+      closePanel();
+      activeHeader = header;
+      activePopover = popover;
+      header.classList.add("filter-open");
+      panelHost.appendChild(popover);
+      panelRow.classList.add("open");
+
+      const input = popover.querySelector("input:not([type='hidden']), select");
+      if (input) setTimeout(() => input.focus(), 0);
+    }
+
+    headers.forEach(header => {
+      const toggle = header.querySelector(".th-filter-toggle");
+      if (!toggle) return;
+      toggle.addEventListener("click", function (event) {
+        event.stopPropagation();
+        if (activeHeader === header) {
+          closePanel();
+        } else {
+          openPanel(header);
+        }
+      });
+    });
+    document.addEventListener("click", function (event) {
+      if (!event.target.closest("th.filterable") && !event.target.closest("#filterPanelHost")) {
+        closePanel();
+      }
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        closePanel();
+      }
+    });
+  })();
+</script>
+{% endblock %}

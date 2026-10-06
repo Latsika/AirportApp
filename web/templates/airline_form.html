@@ -6,6 +6,32 @@
   .muted { opacity:.85; font-size:13px; }
   .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
   .btn-row { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
+  .color-row {
+    display:grid;
+    grid-template-columns: 96px 1fr;
+    gap:12px;
+    align-items:center;
+    margin-bottom:12px;
+  }
+  .color-row input[type="color"] {
+    height:44px;
+    padding:4px;
+    margin:0;
+  }
+  .airline-color-preview {
+    padding:10px 12px;
+    border-radius:12px;
+    border:1px solid var(--border);
+    background:var(--bg-1);
+    font-weight:1000;
+  }
+  .color-enabled {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin:0 0 8px;
+  }
+  .color-enabled input { width:auto; margin:0; }
   .btn-small {
     width:auto; margin:0; padding:10px 14px; border-radius:999px;
     border:1px solid var(--border); background:var(--bg-2); 
@@ -33,6 +59,19 @@
   <label class="muted">Code (unique)</label>
   <input name="code" value="{{ airline.code if airline else '' }}" placeholder="e.g. LH" required>
 
+  <label class="muted">Sales List text color</label>
+  {% set selected_color = airline.display_color if airline and airline.display_color else '#2563eb' %}
+  <label class="muted color-enabled">
+    <input type="checkbox" name="display_color_enabled" id="displayColorEnabled" {% if mode == 'add' or (airline and airline.display_color) %}checked{% endif %}>
+    Use custom color in Sales List
+  </label>
+  <div class="color-row">
+    <input type="color" name="display_color" id="displayColorInput" value="{{ selected_color }}">
+    <div id="airlineColorPreview" class="airline-color-preview" style="color: {{ selected_color }};">
+      {{ airline.name if airline else 'Airline preview' }}{% if airline and airline.code %} ({{ airline.code }}){% endif %}
+    </div>
+  </div>
+
   <label class="muted">
     <input type="checkbox" name="active" {% if airline and airline.active %}checked{% elif mode=='add' %}checked{% endif %}>
     Active
@@ -43,4 +82,28 @@
     <a class="btn-small" href="{{ url_for('airlines') }}">CANCEL</a>
   </div>
 </form>
+<script>
+  (function () {
+    const colorInput = document.getElementById("displayColorInput");
+    const enabledInput = document.getElementById("displayColorEnabled");
+    const preview = document.getElementById("airlineColorPreview");
+    const nameInput = document.querySelector('input[name="name"]');
+    const codeInput = document.querySelector('input[name="code"]');
+    if (!colorInput || !preview) return;
+
+    function updatePreview() {
+      const name = (nameInput && nameInput.value.trim()) || "Airline preview";
+      const code = (codeInput && codeInput.value.trim()) || "";
+      preview.style.color = colorInput.value;
+      preview.style.opacity = enabledInput && !enabledInput.checked ? "0.7" : "1";
+      preview.textContent = code ? `${name} (${code})` : name;
+    }
+
+    colorInput.addEventListener("input", updatePreview);
+    if (enabledInput) enabledInput.addEventListener("change", updatePreview);
+    if (nameInput) nameInput.addEventListener("input", updatePreview);
+    if (codeInput) codeInput.addEventListener("input", updatePreview);
+    updatePreview();
+  })();
+</script>
 {% endblock %}

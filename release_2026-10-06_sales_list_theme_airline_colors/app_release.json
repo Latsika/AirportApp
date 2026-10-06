@@ -1,0 +1,9 @@
+{
+  "app": "AirportApp",
+  "release_id": "20261006T111351Z-df9ba04",
+  "built_at_utc": "2026-10-06T11:13:51+00:00",
+  "git_commit": "df9ba047fc4df0abf52444192d7a969812bee936",
+  "git_commit_short": "df9ba04",
+  "working_tree": "dirty",
+  "source_changes": "M README.md\n M TROUBLESHOOTING.md\n M \"Ticketing _AirportApp.md\"\n M database/db.py\n M web/app.py\n M web/templates/airline_add.html\n M web/templates/airline_edit.html\n M web/templates/airline_form.html\n M web/templates/layout.html\n M web/templates/sales_list.html\n?? rollback_points/"
+}

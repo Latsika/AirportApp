@@ -17,7 +17,7 @@ The server is bound to `127.0.0.1`, so it is not exposed to other computers on t
 Latest release folder:
 
 ```text
-release_CURRENT_2026-07-22_variable_rewards_view
+release_2026-10-06_sales_list_theme_airline_colors
 ```
 
 Release contents:
@@ -62,6 +62,27 @@ Runtime files:
 - `logs/app.log`: application log
 - `app_runtime.json`: current local server port while the app is running
 - `crash.log`: startup crash details, only created after a fatal startup error
+
+## User Interface Updates
+
+The current release adds a Light/Dark mode switch in the user menu. Light mode is the default. The selected mode is stored in the browser's local storage and stays selected after restarting the app.
+
+`Sales List` now includes these visual updates:
+
+- `Sold At` is shown near the start of the table.
+- date is shown as `day.month.year`, with time below the date.
+- item descriptions are hidden; item codes are shown only.
+- `CASH` is green and bold, `CARD` is red and bold.
+- `Item Count` is hidden from the visible table only; backend data and calculations remain unchanged.
+- the table scrolls vertically in the visible window, and horizontal scrolling is available at the bottom of the table when the window is narrow.
+
+Airline names can be visually highlighted in `Sales List`. Admin can set a custom airline text color in:
+
+```text
+Manage Airlines -> EDIT
+```
+
+Only `Sales List` uses the configured airline text color. The airline name remains bold there. Existing airlines keep default styling until Admin enables and saves a custom color.
 
 Automatic DB backups are created on app startup in `backups/`. Backup retention keeps up to 30 automatic DB backups.
 
